@@ -27,8 +27,6 @@ interface LocationData {
 export async function POST(request: NextRequest) {
   try {
     const data = await request.json();
-    console.log("Received data:", data);
-    
     const insertedDate = new Date().toISOString();
     
     // Prepare location data with required fields
@@ -57,7 +55,15 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ success: true, data: { insertedDate } });
     
-  } catch (error) {
+  } catch (error: unknown) {
+    // Handle ConvexError (e.g., "User does not exist")
+    if (error instanceof ConvexError) {
+      return NextResponse.json(
+        { error: String(error.data) },
+        { status: 400 }
+      );
+    }
+    
     // Handle validation errors
     if (error instanceof Error && error.message.includes("ArgumentValidationError")) {
       return NextResponse.json(
@@ -66,8 +72,15 @@ export async function POST(request: NextRequest) {
       );
     }
     
-    // Handle other errors
-    console.error("Error processing location:", error);
+    // Handle Convex server errors that contain ConvexError data
+    if (error instanceof Error && error.message.includes("ConvexError")) {
+      return NextResponse.json(
+        { error: error.message },
+        { status: 400 }
+      );
+    }
+    
+    // Handle other errors as 500
     return NextResponse.json(
       { error: "Internal server error" },
       { status: 500 }

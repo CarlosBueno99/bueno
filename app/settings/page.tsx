@@ -18,6 +18,8 @@ export default function OwnerPage() {
   const permission = useQuery(api.auth.getUserPermission);
   const updateUserPermission = useMutation(api.auth.updateUserPermission);
   const saveWebsiteSettings = useMutation(api.websiteSettings.saveWebsiteSettings);
+  const saveCs2Settings = useMutation(api.websiteSettings.saveCs2Settings);
+  const cs2Settings = useQuery(api.websiteSettings.getMyCs2Settings);
 
   const [apiKeys, setApiKeys] = useState({
     steamApiKey: "sk_************",
@@ -34,9 +36,23 @@ export default function OwnerPage() {
   const [steamApiKey, setSteamApiKey] = useState(apiKeys.steamApiKey);
   const [steamId, setSteamId] = useState(apiKeys.steamId);
 
+  // CS2 settings form state
+  const [lastShareCode, setLastShareCode] = useState("");
+  const [shareCodeAuthToken, setShareCodeAuthToken] = useState("");
+  const [cs2SettingsLoaded, setCs2SettingsLoaded] = useState(false);
+
+  // Load CS2 settings into form when data is available
+  useEffect(() => {
+    if (cs2Settings && !cs2SettingsLoaded) {
+      setLastShareCode(cs2Settings.lastShareCode ?? "");
+      setShareCodeAuthToken(cs2Settings.shareCodeAuthToken ?? "");
+      setCs2SettingsLoaded(true);
+    }
+  }, [cs2Settings, cs2SettingsLoaded]);
+
   // Check if user has owner permission
   useEffect(() => {
-    if (permission === null && user !== undefined) {
+    if (permission === null && user) {
       // User is logged in but has no permissions, redirect to home
       router.push("/");
     }
@@ -147,6 +163,67 @@ export default function OwnerPage() {
                   </div>
                 </CardContent>
               </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle>CS2 Match History</CardTitle>
+                  <CardDescription>
+                    Configure settings for fetching your CS2 match history
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="space-y-2">
+                    <label htmlFor="last-share-code" className="text-sm font-medium">
+                      Last Known Share Code
+                    </label>
+                    <Input
+                      id="last-share-code"
+                      type="text"
+                      value={lastShareCode}
+                      onChange={(e) => setLastShareCode(e.target.value)}
+                      placeholder="CSGO-xxxxx-xxxxx-xxxxx-xxxxx-xxxxx"
+                    />
+                    <p className="text-xs text-gray-500">
+                      You can find share codes in your CS2 match history. This is used as a starting point to fetch newer matches.
+                    </p>
+                  </div>
+                  <div className="space-y-2">
+                    <label htmlFor="share-code-auth-token" className="text-sm font-medium">
+                      Match History Authentication Token
+                    </label>
+                    <Input
+                      id="share-code-auth-token"
+                      type="password"
+                      value={shareCodeAuthToken}
+                      onChange={(e) => setShareCodeAuthToken(e.target.value)}
+                      placeholder="XXXX-XXXXX-XXXX"
+                    />
+                    <p className="text-xs text-gray-500">
+                      Required to access your match history.{" "}
+                      <a 
+                        href="https://help.steampowered.com/en/wizard/HelpWithGameIssue/?appid=730&issueid=128"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-blue-600 hover:text-blue-800 underline"
+                      >
+                        Get your authentication token from Steam
+                      </a>
+                    </p>
+                  </div>
+                </CardContent>
+                <CardFooter>
+                  <Button
+                    onClick={() =>
+                      saveCs2Settings({
+                        lastShareCode: lastShareCode || undefined,
+                        shareCodeAuthToken: shareCodeAuthToken || undefined,
+                      })
+                    }
+                  >
+                    Save CS2 Settings
+                  </Button>
+                </CardFooter>
+              </Card>
               
               <Card>
                 <CardHeader>
@@ -204,14 +281,6 @@ export default function OwnerPage() {
                     </div>
                   </div>
                   
-                  <div className="pt-4 border-t">
-                    <h3 className="text-sm font-medium mb-2">Deployment Actions</h3>
-                    <div className="flex gap-2">
-                      <Button variant="outline" size="sm">Rebuild</Button>
-                      <Button variant="outline" size="sm">Restart</Button>
-                      <Button variant="destructive" size="sm">Reset Database</Button>
-                    </div>
-                  </div>
                 </div>
               </CardContent>
             </Card>
@@ -272,9 +341,6 @@ export default function OwnerPage() {
                   </div>
                 </div>
               </CardContent>
-              <CardFooter>
-                <Button>Save Security Settings</Button>
-              </CardFooter>
             </Card>
           </TabsContent>
         </Tabs>

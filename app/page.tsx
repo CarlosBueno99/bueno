@@ -3,13 +3,10 @@
 import { useQuery, useMutation, useConvexAuth, useAction } from "convex/react";
 import { api } from "../convex/_generated/api";
 import { Navbar } from "../components/Navbar";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
 import { formatDistanceToNow } from "date-fns";
 import { Alert, AlertDescription, AlertTitle } from "../components/ui/alert";
-import { SignInButton, UserButton } from "@clerk/nextjs";
-import { Authenticated, Unauthenticated } from "convex/react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { Id } from "../convex/_generated/dataModel";
 import { LucidePlay, LucidePause } from "lucide-react";
 
@@ -107,28 +104,12 @@ export default function Home() {
         <main className="flex-grow w-full max-w-5xl mx-auto px-4 py-8">
           <h1 className="text-3xl font-bold mb-8">Dashboard</h1>
           
-          {/* <Unauthenticated>
-            <div className="flex flex-col items-center justify-center p-8 space-y-4">
-              <h2 className="text-2xl font-semibold">Sign in to access your dashboard</h2>
-              <p className="text-muted-foreground mb-4">Connect your accounts and view your stats</p>
-              <SignInButton mode="modal">
-                <button className="px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90">
-                  Sign In
-                </button>
-              </SignInButton>
-            </div>
-          </Unauthenticated>
-          
-          <Authenticated>
-            <DashboardContent />
-          </Authenticated> */}
           <DashboardContent />
         </main>
         <FloatingNowPlaying />
       </div>
     );
-  } catch (error) {
-    console.error("Error in Home page:", error);
+  } catch {
     return <div>Something went wrong. Please try again later.</div>;
   }
 }
@@ -244,6 +225,9 @@ function DashboardContent() {
               <Card>
                 <CardHeader>
                   <CardTitle>Counter-Strike Stats</CardTitle>
+                  <CardDescription>
+                    Last updated {formatDistanceToNow((showMainSteam ? mainSteamData! : steamData!).lastUpdated)} ago
+                  </CardDescription>
                 </CardHeader>
                 <CardContent>
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -367,8 +351,7 @@ function DashboardContent() {
         )}
       </div>
     );
-  } catch (err) {
-    console.error("Error in DashboardContent:", err);
+  } catch {
     return <div>Something went wrong loading your dashboard.</div>;
   }
 }

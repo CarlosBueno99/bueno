@@ -26,36 +26,7 @@ async function getSpotifyAccessToken(refreshToken: string): Promise<string | nul
   }
 }
 
-// --- Actions/Queries ---
-
-export const exchangeSpotifyCodeForToken = action({
-  args: { code: v.string() },
-  handler: async (ctx, args) => {
-    const clientId = process.env.SPOTIFY_CLIENT_ID || "<YOUR_SPOTIFY_CLIENT_ID>";
-    const clientSecret = process.env.SPOTIFY_CLIENT_SECRET || "<YOUR_SPOTIFY_CLIENT_SECRET>";
-    const redirectUri = process.env.SPOTIFY_REDIRECT_URI || "https://yourdomain.com/api/spotify-callback";
-    try {
-      const response = await fetch("https://accounts.spotify.com/api/token", {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: new URLSearchParams({
-          grant_type: "authorization_code",
-          code: args.code,
-          redirect_uri: redirectUri,
-          client_id: clientId,
-          client_secret: clientSecret,
-        }),
-      });
-      const data = await response.json();
-      if (!response.ok || !data.refresh_token) {
-        return { success: false as const, error: String(data.error_description || "No refresh token returned") };
-      }
-      return { success: true as const, refreshToken: data.refresh_token };
-    } catch (err) {
-      return { success: false as const, error: "Failed to fetch token: " + (err instanceof Error ? err.message : String(err)) };
-    }
-  },
-});
+// --- Queries ---
 
 export const getUserById = internalQuery({
   args: { userId: v.id("users") },
@@ -119,13 +90,11 @@ export const refreshSpotifyData = internalAction({
       return { success: false, error: "Failed to fetch top artists: " + (err instanceof Error ? err.message : String(err)) };
     }
     // Fetch recently played tracks
-    console.log("[refreshSpotifyData] About to fetch recently played tracks");
     try {
       const response = await fetch("https://api.spotify.com/v1/me/player/recently-played?limit=10", {
         headers: { Authorization: `Bearer ${accessToken}` },
       });
       const data = await response.json();
-      console.log("[refreshSpotifyData] Spotify recently played API response:", data.items);
       if (response.ok && data.items) {
         recentlyPlayedTracks = data.items.map((item: any) => ({
           name: item.track.name,
@@ -135,12 +104,10 @@ export const refreshSpotifyData = internalAction({
           playedAt: item.played_at,
         }));
       }
-    } catch (err: any) {
+    } catch {
       // Non-fatal: just skip if error
       recentlyPlayedTracks = [];
     }
-    console.log("[refreshSpotifyData] Finished fetch recently played tracks block");
-    console.log("[refreshSpotifyData] recentlyPlayedTracks to be saved:", recentlyPlayedTracks);
     const topGenresArr = Object.entries(topGenres)
       .map(([name, count]) => ({ name, count }))
       .sort((a, b) => (b.count as number) - (a.count as number))
@@ -277,36 +244,6 @@ export const getUserSpotifyData = query({
       topGenres: spotifyData.topGenres,
       recentlyPlayedTracks: spotifyData.recentlyPlayedTracks ?? [],
     };
-  },
-});
-
-export const getRecentlyPlayedTracks = action({
-  args: { userId: v.id("users") },
-  handler: async (ctx, args) => {
-    const refreshToken = await ctx.runQuery(internal.spotify.getUserSpotifyRefreshToken, { userId: args.userId });
-    if (!refreshToken) {
-      return null;
-    }
-    const accessToken = await getSpotifyAccessToken(refreshToken);
-    if (!accessToken) {
-      return null;
-    }
-    const response = await fetch("https://api.spotify.com/v1/me/player/recently-played?limit=10", {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    });
-    const data = await response.json();
-    if (!response.ok || !data.items) {
-      return null;
-    }
-    return data.items.map((item: any) => ({
-      track: {
-        name: item.track.name,
-        artists: item.track.artists.map((a: any) => a.name),
-        album: item.track.album.name,
-        imageUrl: item.track.album.images[0]?.url,
-        playedAt: item.played_at,
-      },
-    }));
   },
 });
 

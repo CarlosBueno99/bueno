@@ -23,50 +23,37 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    // Exchange code for tokens with Spotify
-    const tokenResponse = await fetch('https://accounts.spotify.com/api/token', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'Authorization': `Basic ${Buffer.from(
-          `${process.env.NEXT_PUBLIC_SPOTIFY_CLIENT_ID}:${process.env.SPOTIFY_CLIENT_SECRET}`
-        ).toString('base64')}`,
-      },
-      body: new URLSearchParams({
-        grant_type: 'authorization_code',
-        code,
-        redirect_uri: process.env.NEXT_PUBLIC_SPOTIFY_REDIRECT_URI!,
-      }),
-    });
-
-    const tokens = await tokenResponse.json();
-    console.log(tokens);
-
-    if (!tokens.refresh_token) {
-      return NextResponse.redirect(new URL(`/admin?error=missing_refresh_token`, baseUrl));
-    }
-
-    // Get Clerk session and JWT
+    // Get Clerk session and JWT for Convex authentication
     const { userId, getToken } = await auth();
+    
     if (!userId) {
       return NextResponse.redirect(new URL('/admin?error=not_authenticated', baseUrl));
     }
+    
     const jwt = await getToken({ template: 'convex' });
+    
     if (!jwt) {
-      return NextResponse.redirect(new URL('/admin?error=missing_jwt', baseUrl));
+      return NextResponse.redirect(new URL('/admin?error=auth_error', baseUrl));
     }
+    
+    // Set auth for Convex client
     convex.setAuth(jwt);
+    
+    // Build the redirect URI from the current request URL
+    const redirectUri = `${baseUrl}/api/spotify-callback`;
 
-    // Save the refresh token to Convex
-    try {
-      await convex.mutation(api.websiteSettings.saveSpotifyRefreshToken, { refreshToken: tokens.refresh_token });
-      console.log("Refresh token saved to Convex");
-    } catch (error) {
-      console.error(error);
+    // Call Convex action to exchange code and save token (all server-side)
+    // The action handles: code exchange -> token save -> returns only success/error
+    const result = await convex.action(api.spotifyActions.exchangeSpotifyCodeForToken, { code, redirectUri });
+
+    if (result.success) {
+      return NextResponse.redirect(new URL('/admin?spotify=connected', baseUrl));
+    } else {
+      // Return generic error codes, not detailed error messages
+      return NextResponse.redirect(new URL(`/admin?error=${result.error}`, baseUrl));
     }
-
-    return NextResponse.redirect(new URL('/admin?spotify=connected', baseUrl));
-  } catch (error) {
-    return NextResponse.redirect(new URL(`/admin?error=${encodeURIComponent(String(error))}`, baseUrl));
+  } catch {
+    // Generic error for any unexpected failures
+    return NextResponse.redirect(new URL('/admin?error=spotify_auth_failed', baseUrl));
   }
 } 
