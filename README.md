@@ -202,7 +202,7 @@ flowchart TB
     subgraph nextjs [Next.js]
         DownloadAPI[API: cs/download]
         MatchesAPI[API: cs/matches]
-        EnvVars[Environment Variables<br/>STEAM_USERNAME<br/>STEAM_PASSWORD<br/>STEAM_SHARED_SECRET]
+        EnvVars[Environment Variables<br/>STEAM_USERNAME<br/>STEAM_PASSWORD]
     end
 
     subgraph convex [Convex]
@@ -830,7 +830,7 @@ stateDiagram-v2
 
     LoggingOff --> Disconnected: Cleanup complete
 
-    note right of LoggingIn: Uses STEAM_SHARED_SECRET for 2FA
+    note right of LoggingIn: Uses Steam credentials for login
     note right of WaitingForGC: Must play CS2 to connect to GC
 ```
 
@@ -1352,7 +1352,7 @@ flowchart TD
                                  ▼
 ┌──────────────────────────────────────────────────────────────────┐
 │                  TRUSTED (Server - Next.js API)                   │
-│  • STEAM_USERNAME, STEAM_PASSWORD, STEAM_SHARED_SECRET           │
+│  • STEAM_USERNAME, STEAM_PASSWORD                                │
 │  • Steam GC connections (binary protocol)                         │
 │  • Location API endpoint (validates password)                     │
 │  • OAuth callback handlers                                        │
@@ -1401,14 +1401,15 @@ flowchart TD
 # Convex connection
 NEXT_PUBLIC_CONVEX_URL=https://your-deployment.convex.cloud
 
+# Clerk authentication
+NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_your_clerk_publishable_key
+
 # Spotify OAuth (public = used in client redirect URL)
 NEXT_PUBLIC_SPOTIFY_CLIENT_ID=your_spotify_client_id
-NEXT_PUBLIC_SPOTIFY_REDIRECT_URI=https://yourdomain.com/api/spotify-callback
 
 # Steam GC credentials (server-side only, no NEXT_PUBLIC_ prefix)
 STEAM_USERNAME=your_steam_username
 STEAM_PASSWORD=your_steam_password
-STEAM_SHARED_SECRET=your_2fa_shared_secret
 ```
 
 ### Convex Environment Variables
@@ -1416,10 +1417,12 @@ STEAM_SHARED_SECRET=your_2fa_shared_secret
 Set via `npx convex env set`:
 
 ```bash
+# Clerk authentication (JWT issuer domain for validating tokens)
+CLERK_JWT_ISSUER_DOMAIN=https://your-clerk-domain.clerk.accounts.dev
+
 # Spotify (server-side token exchange)
 SPOTIFY_CLIENT_ID=your_spotify_client_id
 SPOTIFY_CLIENT_SECRET=your_spotify_client_secret
-SPOTIFY_REDIRECT_URI=https://yourdomain.com/api/spotify-callback
 
 # Steam Web API
 STEAM_API_KEY=your_steam_api_key

@@ -46,7 +46,7 @@ export const saveSpotifyRefreshTokenInternal = internalMutation({
 export const exchangeSpotifyCodeForToken = action({
   args: { 
     code: v.string(),
-    redirectUri: v.optional(v.string()),
+    redirectUri: v.string(),
   },
   returns: v.union(
     v.object({ success: v.literal(true) }),
@@ -63,8 +63,7 @@ export const exchangeSpotifyCodeForToken = action({
     // 2. Exchange code for tokens with Spotify (server-side only)
     const clientId = process.env.SPOTIFY_CLIENT_ID;
     const clientSecret = process.env.SPOTIFY_CLIENT_SECRET;
-    // Use provided redirectUri from client, fall back to env variable
-    const redirectUri = args.redirectUri || process.env.SPOTIFY_REDIRECT_URI;
+    const redirectUri = args.redirectUri;
 
     if (!clientId || !clientSecret || !redirectUri) {
       return { success: false as const, error: "spotify_not_configured" };

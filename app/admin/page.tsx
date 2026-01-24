@@ -392,9 +392,7 @@ function AdminPage() {
                       variant="outline"
                       onClick={() => {
                         const clientId = process.env.NEXT_PUBLIC_SPOTIFY_CLIENT_ID || "<YOUR_SPOTIFY_CLIENT_ID>";
-                        const redirectUri = encodeURIComponent(
-                          process.env.NEXT_PUBLIC_SPOTIFY_REDIRECT_URI || "https://yourdomain.com/api/spotify-callback"
-                        );
+                        const redirectUri = encodeURIComponent(`${window.location.origin}/api/spotify-callback`);
                         const scopes = encodeURIComponent("user-top-read user-read-email user-read-recently-played user-read-currently-playing");
                         window.location.href =
                           `https://accounts.spotify.com/authorize?client_id=${clientId}` +
@@ -419,9 +417,7 @@ function AdminPage() {
                   <Button
                     onClick={() => {
                       const clientId = process.env.NEXT_PUBLIC_SPOTIFY_CLIENT_ID || "<YOUR_SPOTIFY_CLIENT_ID>";
-                      const redirectUri = encodeURIComponent(
-                        process.env.NEXT_PUBLIC_SPOTIFY_REDIRECT_URI || "https://yourdomain.com/api/spotify-callback"
-                      );
+                      const redirectUri = encodeURIComponent(`${window.location.origin}/api/spotify-callback`);
                       const scopes = encodeURIComponent("user-top-read user-read-email user-read-recently-played user-read-currently-playing");
                       window.location.href =
                         `https://accounts.spotify.com/authorize?client_id=${clientId}` +
