@@ -35,6 +35,8 @@ async function getMatchSharingCodes(
 ): Promise<{ shareCodes: string[]; error?: string }> {
   const shareCodes: string[] = [];
   let knownCode = startingKnownCode;
+  let retryCount = 0;
+  const maxRetries = 3;
   
   for (let i = 0; i < maxMatches; i++) {
     try {
@@ -42,8 +44,27 @@ async function getMatchSharingCodes(
       console.log(`Fetching match ${i + 1}...`);
       
       const response = await fetch(url);
-      const responseText = await response.text();
       console.log(`Response status: ${response.status}`);
+      
+      // Handle rate limiting (429 Too Many Requests)
+      if (response.status === 429) {
+        if (retryCount < maxRetries) {
+          retryCount++;
+          const waitTime = 2000 * retryCount; // 2s, 4s, 6s
+          console.log(`Rate limited. Waiting ${waitTime}ms before retry ${retryCount}/${maxRetries}...`);
+          await new Promise(r => setTimeout(r, waitTime));
+          i--; // Retry the same match
+          continue;
+        } else {
+          console.log('Max retries reached due to rate limiting. Returning partial results.');
+          return { shareCodes, error: `Rate limited by Steam API. Got ${shareCodes.length} matches before limit.` };
+        }
+      }
+      
+      // Reset retry count on successful request
+      retryCount = 0;
+      
+      const responseText = await response.text();
       
       let data;
       try {
@@ -62,6 +83,9 @@ async function getMatchSharingCodes(
         knownCode = data.result.nextcode;
         shareCodes.push(knownCode);
         console.log(`Got share code ${i + 1}: ${knownCode}`);
+        
+        // Add delay between requests to avoid rate limiting
+        await new Promise(r => setTimeout(r, 300));
       } else {
         console.log('No more matches available.');
         break;
