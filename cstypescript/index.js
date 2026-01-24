@@ -70,22 +70,3 @@ CS2.on('error', function (err) {
 steamClient.on('error', function (err) {
     console.log('Steam client error:', err);
 });
-// async function main() {
-//   await analyzeDemo({
-//     demoPath: 'cstypescript/astralis-vs-spirit-m1-dust2.dem',
-//     outputFolderPath: '.',
-//     format: ExportFormat.JSON,
-//     source: DemoSource.Valve,
-//     analyzePositions: false,
-//     minify: false,
-//     onStderr: console.error,
-//     onStdout: console.log,
-//     onStart: () => {
-//       console.log('Starting!');
-//     },
-//     onEnd: () => {
-//       console.log('Done!');
-//     },
-//   });
-// }
-// main();

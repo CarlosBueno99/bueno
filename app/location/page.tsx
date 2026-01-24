@@ -184,7 +184,7 @@ export default function LocationHistoryPage() {
       <Navbar />
       <main className="flex-grow w-full max-w-3xl mx-auto px-4 py-8">
         <h1 className="text-3xl font-bold mb-8">Location History</h1>
-        {permission === undefined ? (
+        {(permission === undefined || user === undefined) ? (
           <p>Loading...</p>
         ) : !(typeof permission === "string" && ["relatives", "owner"].includes(permission)) ? (
           <div className="text-center text-red-500 font-medium py-12">

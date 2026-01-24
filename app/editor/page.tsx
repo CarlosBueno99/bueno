@@ -25,7 +25,7 @@ export default function EditorPage() {
   
   // Check if user has at least editor permissions
   useEffect(() => {
-    if (permission === null && user !== undefined) {
+    if (permission === null && user) {
       // User is logged in but has no permissions, redirect to home
       router.push("/");
     }

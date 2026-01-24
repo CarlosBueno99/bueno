@@ -115,6 +115,10 @@ export default defineSchema({
     steamId: v.optional(v.string()),
     spotifyRefreshToken: v.optional(v.string()),
     locationApiPassword: v.optional(v.string()),
+    // CS2 match history settings
+    cs2SteamUsername: v.optional(v.string()),
+    cs2LastShareCode: v.optional(v.string()),
+    cs2ShareCodeAuthToken: v.optional(v.string()),
   }).index("by_userId", ["userId"]),
 
   cs2Demos: defineTable({
@@ -123,4 +127,18 @@ export default defineSchema({
     createdAt: v.number(), // Timestamp when parsed
     updatedAt: v.optional(v.number()), // Timestamp when updated
   }).index("by_fileId", ["fileId"]),
+
+  // CS2 match history - stores fetched match data
+  cs2Matches: defineTable({
+    userId: v.id("users"), // User who fetched this match
+    steamId: v.string(), // Steam ID64 of the player whose matches were fetched
+    shareCode: v.string(), // CS2 share code (unique identifier)
+    demoUrl: v.optional(v.string()), // URL to download the demo file
+    matchId: v.optional(v.string()), // Match ID from Steam
+    matchTime: v.optional(v.string()), // ISO timestamp of when the match was played
+    fetchedAt: v.number(), // Timestamp when we fetched this data
+  })
+    .index("by_userId", ["userId"])
+    .index("by_steamId", ["steamId"])
+    .index("by_shareCode", ["shareCode"]),
 }); 

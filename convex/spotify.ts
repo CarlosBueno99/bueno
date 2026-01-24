@@ -119,13 +119,11 @@ export const refreshSpotifyData = internalAction({
       return { success: false, error: "Failed to fetch top artists: " + (err instanceof Error ? err.message : String(err)) };
     }
     // Fetch recently played tracks
-    console.log("[refreshSpotifyData] About to fetch recently played tracks");
     try {
       const response = await fetch("https://api.spotify.com/v1/me/player/recently-played?limit=10", {
         headers: { Authorization: `Bearer ${accessToken}` },
       });
       const data = await response.json();
-      console.log("[refreshSpotifyData] Spotify recently played API response:", data.items);
       if (response.ok && data.items) {
         recentlyPlayedTracks = data.items.map((item: any) => ({
           name: item.track.name,
@@ -135,12 +133,10 @@ export const refreshSpotifyData = internalAction({
           playedAt: item.played_at,
         }));
       }
-    } catch (err: any) {
+    } catch {
       // Non-fatal: just skip if error
       recentlyPlayedTracks = [];
     }
-    console.log("[refreshSpotifyData] Finished fetch recently played tracks block");
-    console.log("[refreshSpotifyData] recentlyPlayedTracks to be saved:", recentlyPlayedTracks);
     const topGenresArr = Object.entries(topGenres)
       .map(([name, count]) => ({ name, count }))
       .sort((a, b) => (b.count as number) - (a.count as number))

@@ -33,7 +33,6 @@ export const getSteamData = query({
         })
       ),
       lastUpdated: v.optional(v.number()),
-      steamApiKey: v.optional(v.string()),
     })
   ),
   handler: async (ctx) => {
@@ -50,11 +49,6 @@ export const getSteamData = query({
     if (!user) {
       return null;
     }
-
-    const settings = await ctx.db
-      .query("websiteSettings")
-      .withIndex("by_userId", (q) => q.eq("userId", user._id))
-      .unique();
 
     const steamData = await ctx.db
       .query("steamData")
@@ -82,7 +76,6 @@ export const getSteamData = query({
         wins: steamData.csStats.wins,
       } : undefined,
       lastUpdated: steamData.lastUpdated,
-      steamApiKey: settings?.steamApiKey ?? undefined,
     };
   },
 });

@@ -30,24 +30,14 @@ export function Navbar() {
 
   // Permission-based links
   if (permission) {
-    // Viewer can access stats
-    // if (["viewer", "editor", "admin", "owner"].includes(permission)) {
-    //   navLinks.push({ name: "Stats", href: "/viewer" });
-    // }
-    
-    // // Editor can access notes
-    // if (["editor", "admin", "owner"].includes(permission)) {
-    //   navLinks.push({ name: "Notes", href: "/editor" });
-    // }
-    
-    // Admin can access settings
+    // Admin can access internal
     if (["admin", "owner"].includes(permission)) {
-      navLinks.push({ name: "Settings", href: "/admin" });
+      navLinks.push({ name: "Internal", href: "/admin" });
     }
     
-    // Owner can access system
+    // Owner can access settings
     if (permission === "owner") {
-      navLinks.push({ name: "System", href: "/owner" });
+      navLinks.push({ name: "Settings", href: "/settings" });
     }
     // Relatives or owner can access locations
     if (["relatives", "owner"].includes(permission)) {

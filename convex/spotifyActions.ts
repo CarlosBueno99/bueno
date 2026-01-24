@@ -1,25 +1,75 @@
-import { action, internalQuery, internalAction } from "./_generated/server";
+import { action, internalQuery, internalAction, internalMutation } from "./_generated/server";
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
 
-// --- Types ---
-interface User {
-  _id: string;
-  [key: string]: any;
-}
-interface WebsiteSettings {
-  spotifyRefreshToken?: string;
-  userId: string;
-  [key: string]: any;
-}
-
-// --- Spotify OAuth Exchange ---
-export const exchangeSpotifyCodeForToken = action({
-  args: { code: v.string() },
+// --- Internal mutation to save refresh token (called from action) ---
+export const saveSpotifyRefreshTokenInternal = internalMutation({
+  args: {
+    tokenIdentifier: v.string(),
+    refreshToken: v.string(),
+  },
+  returns: v.union(
+    v.object({ success: v.literal(true) }),
+    v.object({ success: v.literal(false), error: v.string() })
+  ),
   handler: async (ctx, args) => {
-    const clientId = process.env.SPOTIFY_CLIENT_ID || "<YOUR_SPOTIFY_CLIENT_ID>";
-    const clientSecret = process.env.SPOTIFY_CLIENT_SECRET || "<YOUR_SPOTIFY_CLIENT_SECRET>";
-    const redirectUri = process.env.SPOTIFY_REDIRECT_URI || "https://yourdomain.com/api/spotify-callback";
+    // Find user by tokenIdentifier
+    const user = await ctx.db
+      .query("users")
+      .withIndex("by_token", (q) => q.eq("tokenIdentifier", args.tokenIdentifier))
+      .unique();
+    
+    if (!user) {
+      return { success: false as const, error: "user_not_found" };
+    }
+
+    // Upsert website settings
+    const existing = await ctx.db
+      .query("websiteSettings")
+      .withIndex("by_userId", (q) => q.eq("userId", user._id))
+      .unique();
+
+    if (existing) {
+      await ctx.db.patch(existing._id, { spotifyRefreshToken: args.refreshToken });
+    } else {
+      await ctx.db.insert("websiteSettings", {
+        userId: user._id,
+        spotifyRefreshToken: args.refreshToken,
+      });
+    }
+
+    return { success: true as const };
+  },
+});
+
+// --- Spotify OAuth Exchange (authenticated, saves token internally, never returns token) ---
+export const exchangeSpotifyCodeForToken = action({
+  args: { 
+    code: v.string(),
+    redirectUri: v.optional(v.string()),
+  },
+  returns: v.union(
+    v.object({ success: v.literal(true) }),
+    v.object({ success: v.literal(false), error: v.string() })
+  ),
+  handler: async (ctx, args): Promise<{ success: true } | { success: false; error: string }> => {
+    // 1. Verify the user is authenticated
+    const identity = await ctx.auth.getUserIdentity();
+    
+    if (!identity) {
+      return { success: false as const, error: "not_authenticated" };
+    }
+
+    // 2. Exchange code for tokens with Spotify (server-side only)
+    const clientId = process.env.SPOTIFY_CLIENT_ID;
+    const clientSecret = process.env.SPOTIFY_CLIENT_SECRET;
+    // Use provided redirectUri from client, fall back to env variable
+    const redirectUri = args.redirectUri || process.env.SPOTIFY_REDIRECT_URI;
+
+    if (!clientId || !clientSecret || !redirectUri) {
+      return { success: false as const, error: "spotify_not_configured" };
+    }
+
     try {
       const response = await fetch("https://accounts.spotify.com/api/token", {
         method: "POST",
@@ -32,13 +82,27 @@ export const exchangeSpotifyCodeForToken = action({
           client_secret: clientSecret,
         }),
       });
+
       const data = await response.json();
+      
       if (!response.ok || !data.refresh_token) {
-        return { success: false as const, error: String(data.error_description || "No refresh token returned") };
+        return { success: false as const, error: "token_exchange_failed" };
       }
-      return { success: true as const, refreshToken: data.refresh_token };
-    } catch (err) {
-      return { success: false as const, error: "Failed to fetch token: " + (err instanceof Error ? err.message : String(err)) };
+
+      // 3. Save the refresh token internally (token never leaves Convex)
+      const saveResult = await ctx.runMutation(internal.spotifyActions.saveSpotifyRefreshTokenInternal, {
+        tokenIdentifier: identity.tokenIdentifier,
+        refreshToken: data.refresh_token,
+      });
+
+      if (!saveResult.success) {
+        return { success: false as const, error: saveResult.error };
+      }
+
+      // 4. Return only success status - NEVER return the token
+      return { success: true as const };
+    } catch {
+      return { success: false as const, error: "token_exchange_failed" };
     }
   },
 });
@@ -48,13 +112,6 @@ export const getUserById = internalQuery({
   args: { userId: v.id("users") },
   handler: async (ctx, args) => {
     return await ctx.db.get(args.userId);
-  },
-});
-
-export const usersWithSpotifyRefresh = internalQuery({
-  args: {},
-  handler: async (ctx) => {
-    return await ctx.db.query("websiteSettings").collect();
   },
 });
 
@@ -72,15 +129,19 @@ export const refreshAllSpotifyData = internalAction({
   handler: async (ctx: any): Promise<void> => {
     // Dynamically find the user with 'owner' permission
     const mainUserId = await ctx.runQuery(internal.users.getOwnerUserId, {});
+    
     if (!mainUserId) {
-      console.error("No user with 'owner' permission found");
       return;
     }
-    console.log("Calling refreshSpotifyData for main user", mainUserId);
-    await ctx.runAction(
-      internal.spotify.refreshSpotifyData,
-      { userId: mainUserId }
-    );
+    
+    try {
+      await ctx.runAction(
+        internal.spotify.refreshSpotifyData,
+        { userId: mainUserId }
+      );
+    } catch {
+      // Silently handle refresh errors
+    }
   },
 });
 
@@ -90,4 +151,4 @@ export const triggerSpotifyRefresh = action({
   handler: async (ctx, args): Promise<any> => {
     return await ctx.runAction(internal.spotifyActions.refreshSpotifyData, { userId: args.userId });
   },
-}); 
+});
