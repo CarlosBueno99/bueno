@@ -184,7 +184,7 @@ function AdminPage() {
         targetSteamId: effectiveTargetId,
         authCode,
         ...(knownCode && { knownCode }),
-        maxMatches: 8,
+        maxMatches: 30,
       });
 
       if (!shareCodesResult.success) {
