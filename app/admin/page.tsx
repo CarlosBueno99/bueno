@@ -591,7 +591,7 @@ function AdminPage() {
                                   <span className="text-sm font-medium">
                                     {match.matchTime ? (
                                       <>
-                                        {new Date(match.matchTime).toLocaleDateString()} {new Date(match.matchTime).toLocaleTimeString()}
+                                        {new Date(match.matchTime).toLocaleDateString()}
                                       </>
                                     ) : (
                                       `Match #${idx + 1}`
