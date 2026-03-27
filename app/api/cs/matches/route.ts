@@ -6,12 +6,40 @@ const SteamUser = require('steam-user');
 // @ts-ignore
 const GlobalOffensive = require('globaloffensive');
 
-// Get demo URL for a single share code using the GC
+// Match metadata extracted from GC response
+interface MatchMetadata {
+  shareCode: string;
+  demoUrl: string | null;
+  matchId: string | null;
+  matchTime: string | null;
+  teamScores: number[] | null;
+  matchResult: number | null;
+  targetPlayerTeam: number | null;
+  playerStats: {
+    kills: number;
+    deaths: number;
+    assists: number;
+    headshots: number;
+    mvps: number;
+    score: number;
+  } | null;
+  error?: string;
+}
+
+// Convert Steam ID64 to Steam ID32
+function steamId64ToSteamId32(steamId64: string): number {
+  const id64 = BigInt(steamId64);
+  const id32 = id64 - BigInt('76561197960265728');
+  return Number(id32);
+}
+
+// Get demo URL and match metadata for a single share code using the GC
 async function getDemoUrlForShareCode(
   csgo: any,
   shareCode: string,
+  targetSteamId64: string | null,
   timeoutMs: number = 15000
-): Promise<{ shareCode: string; demoUrl: string | null; matchId: string | null; matchTime: string | null; error?: string }> {
+): Promise<MatchMetadata> {
   return new Promise((resolve) => {
     let resolved = false;
     
@@ -27,22 +55,66 @@ async function getDemoUrlForShareCode(
           demoUrl: null,
           matchId: null,
           matchTime: null,
+          teamScores: null,
+          matchResult: null,
+          targetPlayerTeam: null,
+          playerStats: null,
           error: 'No match found for this share code'
         });
         return;
       }
       
       const match = matches[0];
+      console.log('Full GC match data:', JSON.stringify(match, null, 2));
+      
+      // Get the last round stats (contains final scores and results)
+      const lastRound = match?.['roundstatsall']?.at?.(-1);
+      
       // Demo URL is in roundstatsall -> last item -> map field
-      const demoUrl = match?.['roundstatsall']?.at?.(-1)?.['map'] || null;
+      const demoUrl = lastRound?.['map'] || null;
       const matchId = match?.['matchid']?.toString() || null;
       const matchTime = match?.['matchtime'] ? new Date(match['matchtime'] * 1000).toISOString() : null;
+      
+      // Extract team scores and match result
+      const teamScores: number[] | null = lastRound?.['team_scores'] || null;
+      const matchResult: number | null = lastRound?.['match_result'] ?? null;
+      
+      // Extract player stats if we have a target Steam ID
+      let targetPlayerTeam: number | null = null;
+      let playerStats: MatchMetadata['playerStats'] = null;
+      
+      if (targetSteamId64 && lastRound) {
+        const targetSteamId32 = steamId64ToSteamId32(targetSteamId64);
+        const accountIds: number[] = lastRound?.['reservation']?.['account_ids'] || [];
+        
+        // Find the player's index in the account_ids array
+        // Indices 0-4 = Team 1, 5-9 = Team 2
+        const playerIndex = accountIds.indexOf(targetSteamId32);
+        
+        if (playerIndex !== -1) {
+          targetPlayerTeam = playerIndex < 5 ? 1 : 2;
+          
+          // Extract player stats from the arrays
+          playerStats = {
+            kills: lastRound['kills']?.[playerIndex] ?? 0,
+            deaths: lastRound['deaths']?.[playerIndex] ?? 0,
+            assists: lastRound['assists']?.[playerIndex] ?? 0,
+            headshots: lastRound['enemy_headshots']?.[playerIndex] ?? 0,
+            mvps: lastRound['mvps']?.[playerIndex] ?? 0,
+            score: lastRound['scores']?.[playerIndex] ?? 0,
+          };
+        }
+      }
       
       resolve({
         shareCode,
         demoUrl,
         matchId,
         matchTime,
+        teamScores,
+        matchResult,
+        targetPlayerTeam,
+        playerStats,
       });
     };
     
@@ -60,6 +132,10 @@ async function getDemoUrlForShareCode(
           demoUrl: null,
           matchId: null,
           matchTime: null,
+          teamScores: null,
+          matchResult: null,
+          targetPlayerTeam: null,
+          playerStats: null,
           error: 'Timeout waiting for match data'
         });
       }
@@ -70,11 +146,12 @@ async function getDemoUrlForShareCode(
 /**
  * GET /api/cs/matches
  * 
- * Fetches demo URLs for the provided share codes by connecting to Steam GC.
+ * Fetches demo URLs and match metadata for the provided share codes by connecting to Steam GC.
  * Steam credentials are read from environment variables.
  * 
  * Query params:
  * - shareCodes: comma-separated list of CS2 share codes
+ * - targetSteamId: (optional) Steam ID64 of the target player to extract their stats
  */
 export async function GET(request: NextRequest) {
   // Verify user is authenticated via Clerk
@@ -88,6 +165,7 @@ export async function GET(request: NextRequest) {
 
   const { searchParams } = new URL(request.url);
   const shareCodesParam = searchParams.get('shareCodes');
+  const targetSteamId = searchParams.get('targetSteamId'); // Optional: Steam ID64 for player stats
 
   // Read Steam credentials from environment variables
   const username = process.env.STEAM_USERNAME;
@@ -113,7 +191,7 @@ export async function GET(request: NextRequest) {
     }, { status: 400 });
   }
 
-  console.log(`Fetching demo URLs for ${shareCodes.length} share codes...`);
+  console.log(`Fetching demo URLs for ${shareCodes.length} share codes...${targetSteamId ? ` (target: ${targetSteamId})` : ''}`);
 
   // Connect to Steam and GC, then fetch demo URLs for each share code
   return new Promise<NextResponse>((resolve) => {
@@ -160,9 +238,9 @@ export async function GET(request: NextRequest) {
       console.log('Connected to CS2 GC, fetching demo URLs...');
       
       try {
-        const results = [];
+        const results: MatchMetadata[] = [];
         for (const shareCode of shareCodes) {
-          const result = await getDemoUrlForShareCode(csgo, shareCode, 10000);
+          const result = await getDemoUrlForShareCode(csgo, shareCode, targetSteamId, 10000);
           results.push(result);
           console.log(`Result for ${shareCode}:`, result.demoUrl ? 'Found' : result.error);
           
@@ -179,6 +257,10 @@ export async function GET(request: NextRequest) {
             demoUrl: r.demoUrl,
             matchId: r.matchId,
             matchTime: r.matchTime,
+            teamScores: r.teamScores,
+            matchResult: r.matchResult,
+            targetPlayerTeam: r.targetPlayerTeam,
+            playerStats: r.playerStats,
             error: r.error,
           }));
           

@@ -21,6 +21,7 @@ function AdminPage() {
   const triggerSpotifyRefresh = useAction(api.spotify.triggerSpotifyRefresh);
   const fetchMatchShareCodes = useAction(api.cs2Actions.fetchMatchShareCodes);
   const saveMatchResults = useMutation(api.cs2Actions.saveMatchResults);
+  const triggerDemoArchive = useAction(api.cs2Actions.triggerDemoArchive);
 
   const [email, setEmail] = useState("");
   const [newPermission, setNewPermission] = useState("viewer");
@@ -40,6 +41,17 @@ function AdminPage() {
   const [targetSteamId, setTargetSteamId] = useState("");
   const [authCode, setAuthCode] = useState(""); // CS2 Authentication Code for GetNextMatchSharingCode API
   const [knownCode, setKnownCode] = useState(""); // Starting share code to get matches after
+  
+  // S3 Archive state
+  const [archiveLoading, setArchiveLoading] = useState(false);
+  const [archiveResult, setArchiveResult] = useState<{
+    success: boolean;
+    processed: number;
+    successful: number;
+    failed: number;
+    errors: string[];
+    error?: string;
+  } | null>(null);
   
   // Get Steam settings from Convex
   const websiteSettings = useQuery(api.websiteSettings.getMyWebsiteSettings);
@@ -192,12 +204,14 @@ function AdminPage() {
       }
 
       if (!shareCodesResult.shareCodes || shareCodesResult.shareCodes.length === 0) {
-        setMatchesError("No share codes found.");
+        setMatchesError("No new matches found since the last saved match. You're all caught up!");
         return;
       }
 
       // Step 2: Get demo URLs via Next.js API route (uses Steam GC)
-      const response = await fetch(`/api/cs/matches?shareCodes=${shareCodesResult.shareCodes.join(',')}`);
+      // Pass targetSteamId to get player stats
+      const targetId = shareCodesResult.steamId || effectiveTargetId;
+      const response = await fetch(`/api/cs/matches?shareCodes=${shareCodesResult.shareCodes.join(',')}&targetSteamId=${targetId}`);
       const data = await response.json();
 
       if (!response.ok) {
@@ -207,7 +221,7 @@ function AdminPage() {
       if (data.matches && data.matches.length > 0) {
         setNewlyFetchedMatches(data.matches);
 
-        // Step 3: Save results to Convex
+        // Step 3: Save results to Convex (including metadata)
         const saveResult = await saveMatchResults({
           targetSteamId: shareCodesResult.steamId || effectiveTargetId,
           matches: data.matches.map((m: any) => ({
@@ -215,6 +229,10 @@ function AdminPage() {
             demoUrl: m.demoUrl || undefined,
             matchId: m.matchId || undefined,
             matchTime: m.matchTime || undefined,
+            teamScores: m.teamScores || undefined,
+            matchResult: m.matchResult ?? undefined,
+            targetPlayerTeam: m.targetPlayerTeam ?? undefined,
+            playerStats: m.playerStats || undefined,
           })),
         });
 
@@ -230,6 +248,45 @@ function AdminPage() {
     } finally {
       setMatchesLoading(false);
     }
+  };
+
+  const handleArchiveDemos = async () => {
+    setArchiveLoading(true);
+    setArchiveResult(null);
+    
+    try {
+      const result = await triggerDemoArchive({});
+      setArchiveResult(result);
+    } catch (error) {
+      setArchiveResult({
+        success: false,
+        processed: 0,
+        successful: 0,
+        failed: 0,
+        errors: [],
+        error: error instanceof Error ? error.message : "Unknown error occurred",
+      });
+    } finally {
+      setArchiveLoading(false);
+    }
+  };
+
+  // Helper to determine win/loss for display
+  const getMatchResult = (match: any): { won: boolean | null; score: string } => {
+    if (match.matchResult === undefined || match.targetPlayerTeam === undefined) {
+      return { won: null, score: '' };
+    }
+    const won = match.matchResult === match.targetPlayerTeam;
+    let score = '';
+    if (match.teamScores && match.teamScores.length === 2) {
+      // Show target player's team score first
+      if (match.targetPlayerTeam === 1) {
+        score = `${match.teamScores[0]}-${match.teamScores[1]}`;
+      } else {
+        score = `${match.teamScores[1]}-${match.teamScores[0]}`;
+      }
+    }
+    return { won, score };
   };
 
   return (
@@ -558,12 +615,34 @@ function AdminPage() {
                   </div>
                 )}
 
+                {/* Archive Status */}
+                {archiveResult && (
+                  <div className={`p-3 rounded-md text-sm ${archiveResult.success ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200'}`}>
+                    {archiveResult.error ? (
+                      <p className="text-red-700">{archiveResult.error}</p>
+                    ) : (
+                      <div>
+                        <p className={archiveResult.successful > 0 ? 'text-green-700' : 'text-gray-600'}>
+                          Processed {archiveResult.processed} matches: {archiveResult.successful} archived, {archiveResult.failed} failed
+                        </p>
+                        {archiveResult.errors.length > 0 && (
+                          <ul className="mt-2 text-red-600 text-xs">
+                            {archiveResult.errors.map((err, i) => (
+                              <li key={i}>• {err}</li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {/* Saved matches from database */}
                 {savedMatches && savedMatches.length > 0 ? (
                   <div className="space-y-3">
                     <div className="flex items-center justify-between">
                       <p className="font-medium text-sm text-gray-600">
-                        {savedMatches.length} saved matches ({savedMatches.filter(m => m.demoUrl).length} with demo links)
+                        {savedMatches.length} saved matches ({savedMatches.filter((m: typeof savedMatches[0]) => m.demoUrl).length} with demo links, {savedMatches.filter((m: typeof savedMatches[0]) => m.s3ObjectKey).length} archived)
                       </p>
                     </div>
                     <div className="max-h-96 overflow-y-auto space-y-2">
@@ -580,6 +659,7 @@ function AdminPage() {
                           const thirtyDaysAgo = new Date();
                           thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
                           const isExpired = matchDate && matchDate < thirtyDaysAgo;
+                          const { won, score } = getMatchResult(match);
                           
                           return (
                             <div 
@@ -587,35 +667,60 @@ function AdminPage() {
                               className="p-3 bg-gray-50 rounded-md border"
                             >
                               <div className="flex flex-col gap-1">
-                                <div className="flex items-center justify-between">
-                                  <span className="text-sm font-medium">
-                                    {match.matchTime ? (
-                                      <>
-                                        {new Date(match.matchTime).toLocaleDateString()}
-                                      </>
-                                    ) : (
-                                      `Match #${idx + 1}`
+                                <div className="flex items-center justify-between gap-2">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-sm font-medium">
+                                      {match.matchTime ? (
+                                        <>
+                                          {new Date(match.matchTime).toLocaleDateString()}
+                                        </>
+                                      ) : (
+                                        `Match #${idx + 1}`
+                                      )}
+                                    </span>
+                                    {won !== null && (
+                                      <Badge 
+                                        variant="outline" 
+                                        className={won 
+                                          ? "bg-green-100 text-green-800 border-green-300" 
+                                          : "bg-red-100 text-red-800 border-red-300"
+                                        }
+                                      >
+                                        {won ? 'W' : 'L'} {score}
+                                      </Badge>
                                     )}
-                                  </span>
-                                  {match.demoUrl ? (
-                                    isExpired ? (
-                                      <Badge variant="outline" className="bg-yellow-100 text-yellow-800 border-yellow-300">Expired Demo</Badge>
+                                  </div>
+                                  <div className="flex items-center gap-1">
+                                    {/* S3 Archive Status */}
+                                    {match.s3ObjectKey ? (
+                                      <Badge className="bg-purple-600">Archived</Badge>
+                                    ) : match.demoUrl ? (
+                                      isExpired ? (
+                                        <Badge variant="outline" className="bg-yellow-100 text-yellow-800 border-yellow-300">Expired</Badge>
+                                      ) : (
+                                        <Badge variant="outline" className="bg-blue-100 text-blue-800 border-blue-300">Pending</Badge>
+                                      )
                                     ) : (
-                                      <Badge variant="default" className="bg-green-600">Demo Available</Badge>
-                                    )
-                                  ) : (
-                                    <Badge variant="secondary">No Demo</Badge>
-                                  )}
+                                      <Badge variant="secondary">No Demo</Badge>
+                                    )}
+                                  </div>
                                 </div>
+                                {/* Player Stats */}
+                                {match.playerStats && (
+                                  <div className="text-xs text-gray-600 flex gap-3">
+                                    <span>K: {match.playerStats.kills}</span>
+                                    <span>D: {match.playerStats.deaths}</span>
+                                    <span>A: {match.playerStats.assists}</span>
+                                    <span>HS: {match.playerStats.headshots}</span>
+                                    {match.playerStats.mvps > 0 && (
+                                      <span className="text-yellow-600">★ {match.playerStats.mvps}</span>
+                                    )}
+                                  </div>
+                                )}
                                 <span className="text-xs text-gray-500 font-mono">
                                   {match.shareCode}
                                 </span>
-                                {match.targetSteamId && (
-                                  <span className="text-xs text-gray-400">
-                                    Steam ID: {match.targetSteamId}
-                                  </span>
-                                )}
-                                {match.demoUrl && (
+                                {match.demoUrl && !match.s3ObjectKey && (
                                   <a 
                                     href={match.demoUrl} 
                                     target="_blank" 
@@ -624,6 +729,11 @@ function AdminPage() {
                                   >
                                     Download Demo
                                   </a>
+                                )}
+                                {match.s3ObjectKey && (
+                                  <span className="text-xs text-purple-600 break-all">
+                                    {match.s3ObjectKey}
+                                  </span>
                                 )}
                               </div>
                             </div>
@@ -644,15 +754,26 @@ function AdminPage() {
                   Enter the target user's CS2 Authentication Code to fetch new matches.
                 </p>
               )}
-              <Button 
-                onClick={handleFetchRecentMatches}
-                disabled={matchesLoading || !authCode || (!targetSteamId && !websiteSettings?.steamId)}
-              >
-                {matchesLoading ? "Fetching..." : savedMatches && savedMatches.length > 0 ? "Fetch New Matches" : "Fetch Matches"}
-              </Button>
+              <div className="flex gap-2">
+                <Button 
+                  onClick={handleFetchRecentMatches}
+                  disabled={matchesLoading || !authCode || (!targetSteamId && !websiteSettings?.steamId)}
+                >
+                  {matchesLoading ? "Fetching..." : savedMatches && savedMatches.length > 0 ? "Fetch New Matches" : "Fetch Matches"}
+                </Button>
+                {savedMatches && savedMatches.some((m: typeof savedMatches[0]) => m.demoUrl && !m.s3ObjectKey) && (
+                  <Button 
+                    variant="outline"
+                    onClick={handleArchiveDemos}
+                    disabled={archiveLoading}
+                  >
+                    {archiveLoading ? "Archiving..." : "Archive Demos to S3"}
+                  </Button>
+                )}
+              </div>
               <p className="text-xs text-gray-500">
                 {savedMatches && savedMatches.length > 0 
-                  ? "Will fetch matches newer than the latest saved match."
+                  ? "Will fetch matches newer than the latest saved match. Archive button saves demos to S3 before they expire."
                   : "First fetch requires a starting share code."}
               </p>
             </CardFooter>
