@@ -137,6 +137,20 @@ export default defineSchema({
     matchId: v.optional(v.string()), // Match ID from Steam
     matchTime: v.optional(v.string()), // ISO timestamp of when the match was played
     fetchedAt: v.number(), // Timestamp when we fetched this data
+    // S3 archive fields
+    s3ObjectKey: v.optional(v.string()), // Full S3 URI where demo is archived
+    // Match metadata from Game Coordinator
+    teamScores: v.optional(v.array(v.number())), // [team1_score, team2_score]
+    matchResult: v.optional(v.number()), // 1 = Team 1 won, 2 = Team 2 won
+    targetPlayerTeam: v.optional(v.number()), // Which team (1 or 2) the target player was on
+    playerStats: v.optional(v.object({
+      kills: v.number(),
+      deaths: v.number(),
+      assists: v.number(),
+      headshots: v.number(),
+      mvps: v.number(),
+      score: v.number(),
+    })),
   })
     .index("by_userId", ["userId"])
     .index("by_steamId", ["steamId"])

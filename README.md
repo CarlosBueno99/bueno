@@ -66,7 +66,8 @@ This split exists because some operations (like Steam Game Coordinator connectio
 | **Spotify Now Playing** | Polls every 10s via `useAction` | — | Action fetches current track on-demand | Spotify `/me/player/currently-playing` |
 | **Steam Data** | Displays games, CS2 stats via `useQuery` | — | Cron refreshes every 1 hour, stores in `steamData` | Steam `GetRecentlyPlayedGames`, `GetUserStatsForGame` |
 | **CS2 Share Codes** | Triggers fetch via `useAction` | — | Action loops `GetNextMatchSharingCode` until exhausted | Steam Web API |
-| **CS2 Demo URLs** | Sends share codes via `fetch()` | Logs into Steam GC, requests match data | — | Steam Game Coordinator (binary protocol) |
+| **CS2 Demo URLs** | Sends share codes via `fetch()` | Logs into Steam GC, requests match data + metadata | — | Steam Game Coordinator (binary protocol) |
+| **CS2 Demo Archiving** | Manual trigger via button | — | Cron archives every 30 min, action downloads from Valve and uploads to S3 | Valve CDN, AWS S3 |
 | **Location** | Renders Leaflet map, displays history | Receives POST from external devices, calls mutation | Stores in `locations`, queries with permission check | OpenStreetMap tiles + Nominatim geocoding |
 | **Lucky Numbers** | Generates via `Math.random()`, displays in UI | — | — | — |
 | **Auth** | Clerk `<SignIn/>` component, `ConvexClientProvider` | — | Creates/updates user on login, manages permissions | Clerk |
@@ -1042,6 +1043,11 @@ classDiagram
         +string matchId [optional]
         +string matchTime [optional]
         +number fetchedAt
+        +string s3ObjectKey [optional]
+        +Array~number~ teamScores [optional]
+        +number matchResult [optional]
+        +number targetPlayerTeam [optional]
+        +Object playerStats [optional]
     }
 
     class cs2Demos {
@@ -1139,11 +1145,13 @@ classDiagram
         +getCurrentlyPlayingTrack()
         +fetchMatchShareCodes()
         +triggerSpotifyRefresh()
+        +triggerDemoArchive()
     }
 
     class InternalActions {
         +refreshSpotifyData()
         +refreshMainUserSteamData()
+        +downloadPendingDemos()
         +getOwnerUserId()
     }
 
@@ -1363,6 +1371,7 @@ flowchart TD
 │                  TRUSTED (Server - Convex)                        │
 │  • SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET                      │
 │  • STEAM_API_KEY (for Web API calls)                             │
+│  • AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY (for S3 uploads)     │
 │  • All database read/write operations                             │
 │  • Refresh tokens stored encrypted in database                    │
 │  • Cron job execution (runs as system, not user)                  │
@@ -1388,6 +1397,8 @@ flowchart TD
 - Steam username/password/shared secret
 - Spotify client secret
 - Spotify refresh tokens
+- AWS credentials (access key, secret key)
+- S3 bucket configuration
 - Location API password
 - Other users’ data
 
@@ -1426,6 +1437,14 @@ SPOTIFY_CLIENT_SECRET=your_spotify_client_secret
 
 # Steam Web API
 STEAM_API_KEY=your_steam_api_key
+
+# AWS S3 (for CS2 demo archiving)
+AWS_ACCESS_KEY_ID=your_aws_access_key_id
+AWS_SECRET_ACCESS_KEY=your_aws_secret_access_key
+AWS_REGION=us-east-1
+
+# CS2 Demo S3 Path (full S3 URI including bucket and optional prefix)
+CS2_DEMOS_S3_PATH=s3://your-bucket-name/optional-prefix
 ```
 
 ---

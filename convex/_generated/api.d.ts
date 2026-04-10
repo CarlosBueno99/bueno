@@ -18,6 +18,7 @@ import type * as _internal_steamData from "../_internal/steamData.js";
 import type * as auth from "../auth.js";
 import type * as crons from "../crons.js";
 import type * as cs2Actions from "../cs2Actions.js";
+import type * as cs2DemoArchiver from "../cs2DemoArchiver.js";
 import type * as locations from "../locations.js";
 import type * as privateNotes from "../privateNotes.js";
 import type * as spotify from "../spotify.js";
@@ -42,6 +43,7 @@ declare const fullApi: ApiFromModules<{
   auth: typeof auth;
   crons: typeof crons;
   cs2Actions: typeof cs2Actions;
+  cs2DemoArchiver: typeof cs2DemoArchiver;
   locations: typeof locations;
   privateNotes: typeof privateNotes;
   spotify: typeof spotify;

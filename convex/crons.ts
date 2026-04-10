@@ -20,4 +20,11 @@ crons.interval(
   internal.steamApi.refreshMainUserSteamData
 );
 
+// Archive CS2 demos to S3 every 30 minutes
+crons.interval(
+  "Archive CS2 demos to S3 every 30 minutes",
+  { minutes: 30 },
+  internal.cs2DemoArchiver.downloadPendingDemos
+);
+
 export default crons; 

@@ -1,6 +1,6 @@
-import { action, mutation, query, internalQuery } from "./_generated/server";
+import { action, mutation, query, internalQuery, internalMutation } from "./_generated/server";
 import { v } from "convex/values";
-import { internal } from "./_generated/api";
+import { internal, api } from "./_generated/api";
 
 // Resolve a vanity URL to Steam ID64 using Steam API
 async function resolveVanityUrl(vanityUrl: string, apiKey: string): Promise<string | null> {
@@ -41,24 +41,54 @@ async function getMatchSharingCodes(
   for (let i = 0; i < maxMatches; i++) {
     try {
       const url = `https://api.steampowered.com/ICSGOPlayers_730/GetNextMatchSharingCode/v1?key=${steamApiKey}&steamid=${steamId}&steamidkey=${authCode}&knowncode=${knownCode}`;
-      console.log(`Fetching match ${i + 1}...`);
+      const redactedUrl = url.replace(steamApiKey, '[REDACTED]');
+      console.log(`Fetching match ${i + 1}: ${redactedUrl}`);
       
       const response = await fetch(url);
       console.log(`Response status: ${response.status}`);
       
-      // Handle rate limiting (429 Too Many Requests)
-      if (response.status === 429) {
-        if (retryCount < maxRetries) {
-          retryCount++;
-          const waitTime = 2000 * retryCount; // 2s, 4s, 6s
-          console.log(`Rate limited. Waiting ${waitTime}ms before retry ${retryCount}/${maxRetries}...`);
-          await new Promise(r => setTimeout(r, waitTime));
-          i--; // Retry the same match
-          continue;
-        } else {
-          console.log('Max retries reached due to rate limiting. Returning partial results.');
-          return { shareCodes, error: `Rate limited by Steam API. Got ${shareCodes.length} matches before limit.` };
+      // Handle HTTP error status codes
+      if (!response.ok) {
+        // Handle rate limiting (429 Too Many Requests)
+        if (response.status === 429) {
+          if (retryCount < maxRetries) {
+            retryCount++;
+            const waitTime = 2000 * retryCount; // 2s, 4s, 6s
+            console.log(`Rate limited. Waiting ${waitTime}ms before retry ${retryCount}/${maxRetries}...`);
+            await new Promise(r => setTimeout(r, waitTime));
+            i--; // Retry the same match
+            continue;
+          } else {
+            console.log('Max retries reached due to rate limiting. Returning partial results.');
+            return { shareCodes, error: `Rate limited by Steam API. Got ${shareCodes.length} matches before limit.` };
+          }
         }
+        
+        // Handle 403 Forbidden - usually means invalid auth code or wrong Steam ID
+        if (response.status === 403) {
+          console.error('Steam API returned 403 Forbidden');
+          return { 
+            shareCodes, 
+            error: 'Access denied by Steam API (403). This usually means:\n' +
+              '• The CS2 Authentication Code is invalid or expired (regenerate it in CS2: Settings → Game → Authentication Code)\n' +
+              '• The Authentication Code doesn\'t match the target Steam account\n' +
+              '• The target account\'s match history is set to private'
+          };
+        }
+        
+        // Handle 401 Unauthorized - invalid API key
+        if (response.status === 401) {
+          console.error('Steam API returned 401 Unauthorized');
+          return { shareCodes, error: 'Steam API key is invalid or expired (401). Please check the STEAM_API_KEY configuration.' };
+        }
+        
+        // Handle other error status codes
+        console.error(`Steam API returned status ${response.status}`);
+        const errorText = await response.text();
+        return { 
+          shareCodes, 
+          error: `Steam API error (${response.status}): ${errorText.substring(0, 200)}` 
+        };
       }
       
       // Reset retry count on successful request
@@ -224,13 +254,11 @@ export const fetchMatchShareCodes = action({
       };
     }
     
-    // Only include the starting share code if it was provided by the user (not from DB)
-    // This avoids re-fetching matches we already have
-    const shareCodes: string[] = args.knownCode 
-      ? [startingCode, ...shareCodesResult.shareCodes]
-      : shareCodesResult.shareCodes;
+    // The startingCode is just a cursor/starting point - only return NEW matches after it
+    // Never include the starting code itself to avoid re-fetching matches we already have
+    const shareCodes: string[] = shareCodesResult.shareCodes;
     
-    console.log(`Total share codes: ${shareCodes.length}`);
+    console.log(`Found ${shareCodes.length} new share codes after ${startingCode}`);
     
     return {
       success: true,
@@ -254,6 +282,18 @@ export const saveMatchResults = mutation({
         demoUrl: v.optional(v.string()),
         matchId: v.optional(v.string()),
         matchTime: v.optional(v.string()),
+        // Match metadata from GC
+        teamScores: v.optional(v.array(v.number())),
+        matchResult: v.optional(v.number()),
+        targetPlayerTeam: v.optional(v.number()),
+        playerStats: v.optional(v.object({
+          kills: v.number(),
+          deaths: v.number(),
+          assists: v.number(),
+          headshots: v.number(),
+          mvps: v.number(),
+          score: v.number(),
+        })),
       })
     ),
   },
@@ -296,6 +336,10 @@ export const saveMatchResults = mutation({
           demoUrl: match.demoUrl || existing.demoUrl,
           matchId: match.matchId || existing.matchId,
           matchTime: match.matchTime || existing.matchTime,
+          teamScores: match.teamScores || existing.teamScores,
+          matchResult: match.matchResult ?? existing.matchResult,
+          targetPlayerTeam: match.targetPlayerTeam ?? existing.targetPlayerTeam,
+          playerStats: match.playerStats || existing.playerStats,
           fetchedAt: now,
         });
         updated++;
@@ -308,6 +352,10 @@ export const saveMatchResults = mutation({
           demoUrl: match.demoUrl,
           matchId: match.matchId,
           matchTime: match.matchTime,
+          teamScores: match.teamScores,
+          matchResult: match.matchResult,
+          targetPlayerTeam: match.targetPlayerTeam,
+          playerStats: match.playerStats,
           fetchedAt: now,
         });
         saved++;
@@ -333,6 +381,18 @@ export const getMatchesBySteamId = query({
       matchId: v.optional(v.string()),
       matchTime: v.optional(v.string()),
       fetchedAt: v.number(),
+      s3ObjectKey: v.optional(v.string()),
+      teamScores: v.optional(v.array(v.number())),
+      matchResult: v.optional(v.number()),
+      targetPlayerTeam: v.optional(v.number()),
+      playerStats: v.optional(v.object({
+        kills: v.number(),
+        deaths: v.number(),
+        assists: v.number(),
+        headshots: v.number(),
+        mvps: v.number(),
+        score: v.number(),
+      })),
     })
   ),
   handler: async (ctx, args) => {
@@ -348,6 +408,11 @@ export const getMatchesBySteamId = query({
       matchId: m.matchId,
       matchTime: m.matchTime,
       fetchedAt: m.fetchedAt,
+      s3ObjectKey: m.s3ObjectKey,
+      teamScores: m.teamScores,
+      matchResult: m.matchResult,
+      targetPlayerTeam: m.targetPlayerTeam,
+      playerStats: m.playerStats,
     }));
   },
 });
@@ -369,6 +434,18 @@ export const getLatestMatchBySteamId = query({
       matchId: v.optional(v.string()),
       matchTime: v.optional(v.string()),
       fetchedAt: v.number(),
+      s3ObjectKey: v.optional(v.string()),
+      teamScores: v.optional(v.array(v.number())),
+      matchResult: v.optional(v.number()),
+      targetPlayerTeam: v.optional(v.number()),
+      playerStats: v.optional(v.object({
+        kills: v.number(),
+        deaths: v.number(),
+        assists: v.number(),
+        headshots: v.number(),
+        mvps: v.number(),
+        score: v.number(),
+      })),
     })
   ),
   handler: async (ctx, args) => {
@@ -396,6 +473,11 @@ export const getLatestMatchBySteamId = query({
       matchId: latest.matchId,
       matchTime: latest.matchTime,
       fetchedAt: latest.fetchedAt,
+      s3ObjectKey: latest.s3ObjectKey,
+      teamScores: latest.teamScores,
+      matchResult: latest.matchResult,
+      targetPlayerTeam: latest.targetPlayerTeam,
+      playerStats: latest.playerStats,
     };
   },
 });
@@ -414,6 +496,18 @@ export const getMyMatches = query({
       matchId: v.optional(v.string()),
       matchTime: v.optional(v.string()),
       fetchedAt: v.number(),
+      s3ObjectKey: v.optional(v.string()),
+      teamScores: v.optional(v.array(v.number())),
+      matchResult: v.optional(v.number()),
+      targetPlayerTeam: v.optional(v.number()),
+      playerStats: v.optional(v.object({
+        kills: v.number(),
+        deaths: v.number(),
+        assists: v.number(),
+        headshots: v.number(),
+        mvps: v.number(),
+        score: v.number(),
+      })),
     })
   ),
   handler: async (ctx) => {
@@ -440,6 +534,209 @@ export const getMyMatches = query({
       matchId: m.matchId,
       matchTime: m.matchTime,
       fetchedAt: m.fetchedAt,
+      s3ObjectKey: m.s3ObjectKey,
+      teamScores: m.teamScores,
+      matchResult: m.matchResult,
+      targetPlayerTeam: m.targetPlayerTeam,
+      playerStats: m.playerStats,
     }));
+  },
+});
+
+// ==========================================
+// S3 Demo Archiving Functions
+// ==========================================
+
+/**
+ * Internal query to get matches pending download (for cron and manual trigger).
+ * Returns matches where:
+ * - demoUrl exists
+ * - s3ObjectKey is undefined
+ * - matchTime is within 30 days
+ */
+export const getMatchesPendingDownload = internalQuery({
+  args: {},
+  returns: v.array(
+    v.object({
+      _id: v.id("cs2Matches"),
+      shareCode: v.string(),
+      demoUrl: v.string(),
+      matchTime: v.optional(v.string()),
+      steamId: v.string(),
+      teamScores: v.optional(v.array(v.number())),
+      matchResult: v.optional(v.number()),
+      targetPlayerTeam: v.optional(v.number()),
+    })
+  ),
+  handler: async (ctx) => {
+    const thirtyDaysAgo = Date.now() - (30 * 24 * 60 * 60 * 1000);
+    
+    // Get all matches - we'll filter in memory since we need multiple conditions
+    const allMatches = await ctx.db.query("cs2Matches").collect();
+    
+    const pendingMatches = allMatches.filter((m) => {
+      // Must have demoUrl
+      if (!m.demoUrl) return false;
+      
+      // Must not already be archived
+      if (m.s3ObjectKey) return false;
+      
+      // Must be within 30 days (if matchTime exists)
+      if (m.matchTime) {
+        const matchDate = new Date(m.matchTime).getTime();
+        if (matchDate < thirtyDaysAgo) return false;
+      }
+      
+      return true;
+    });
+    
+    return pendingMatches.map((m) => ({
+      _id: m._id,
+      shareCode: m.shareCode,
+      demoUrl: m.demoUrl!,
+      matchTime: m.matchTime,
+      steamId: m.steamId,
+      teamScores: m.teamScores,
+      matchResult: m.matchResult,
+      targetPlayerTeam: m.targetPlayerTeam,
+    }));
+  },
+});
+
+/**
+ * Internal mutation to update a match with its S3 object key.
+ */
+export const updateMatchS3Key = internalMutation({
+  args: {
+    matchId: v.id("cs2Matches"),
+    s3ObjectKey: v.string(),
+  },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.matchId, {
+      s3ObjectKey: args.s3ObjectKey,
+    });
+    return null;
+  },
+});
+
+/**
+ * Generate a filename for the archived demo.
+ * Format: {steamId}-{date}-{W|L}-{score}-{shareCodePrefix}.dem.bz2
+ */
+function generateDemoFilename(
+  steamId: string,
+  matchTime: string | undefined,
+  teamScores: number[] | undefined,
+  matchResult: number | undefined,
+  targetPlayerTeam: number | undefined,
+  shareCode: string
+): string {
+  // Get date part
+  const date = matchTime 
+    ? new Date(matchTime).toISOString().split('T')[0] 
+    : new Date().toISOString().split('T')[0];
+  
+  // Determine win/loss
+  let winLoss = 'U'; // Unknown
+  if (matchResult !== undefined && targetPlayerTeam !== undefined) {
+    winLoss = matchResult === targetPlayerTeam ? 'W' : 'L';
+  }
+  
+  // Get score string
+  let scoreStr = '0-0';
+  if (teamScores && teamScores.length === 2 && targetPlayerTeam !== undefined) {
+    // Put the target player's team score first
+    if (targetPlayerTeam === 1) {
+      scoreStr = `${teamScores[0]}-${teamScores[1]}`;
+    } else {
+      scoreStr = `${teamScores[1]}-${teamScores[0]}`;
+    }
+  }
+  
+  // Get share code prefix (first segment)
+  const shareCodePrefix = shareCode.replace('CSGO-', '').split('-')[0] || shareCode.substring(0, 5);
+  
+  return `${steamId}-${date}-${winLoss}-${scoreStr}-${shareCodePrefix}.dem.bz2`;
+}
+
+// Type for archive result (used by triggerDemoArchive)
+type ArchiveResult = {
+  processed: number;
+  successful: number;
+  failed: number;
+  errors: string[];
+};
+
+// Type for trigger archive result
+type TriggerArchiveResult = {
+  success: boolean;
+  processed: number;
+  successful: number;
+  failed: number;
+  errors: string[];
+  error?: string;
+};
+
+/**
+ * Public action to trigger demo archiving manually (from admin UI).
+ * Validates user permissions before running.
+ */
+export const triggerDemoArchive = action({
+  args: {},
+  returns: v.object({
+    success: v.boolean(),
+    processed: v.number(),
+    successful: v.number(),
+    failed: v.number(),
+    errors: v.array(v.string()),
+    error: v.optional(v.string()),
+  }),
+  handler: async (ctx): Promise<TriggerArchiveResult> => {
+    // Check if user is authenticated and has admin/owner permissions
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      return { 
+        success: false, 
+        processed: 0, 
+        successful: 0, 
+        failed: 0, 
+        errors: [], 
+        error: 'Not authenticated' 
+      };
+    }
+    
+    // Get user and check permissions
+    const user = await ctx.runQuery(api.auth.getMe, {});
+    if (!user) {
+      return { 
+        success: false, 
+        processed: 0, 
+        successful: 0, 
+        failed: 0, 
+        errors: [], 
+        error: 'User not found' 
+      };
+    }
+    
+    const permission = await ctx.runQuery(api.auth.getUserPermission, {});
+    if (!permission || !['admin', 'owner'].includes(permission)) {
+      return { 
+        success: false, 
+        processed: 0, 
+        successful: 0, 
+        failed: 0, 
+        errors: [], 
+        error: 'Insufficient permissions. Admin or owner role required.' 
+      };
+    }
+    
+    // Run the internal action (from the Node.js file with more memory)
+    const result: ArchiveResult = await ctx.runAction(internal.cs2DemoArchiver.downloadPendingDemos, {});
+    
+    return {
+      success: true,
+      ...result,
+    };
   },
 });
