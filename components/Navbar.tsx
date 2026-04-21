@@ -1,8 +1,5 @@
-"use client";
-
 import { useQuery, useConvexAuth, useAction } from "convex/react";
-import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { Link, useRouterState } from "@tanstack/react-router";
 import { api } from "../convex/_generated/api";
 import { Button } from "./ui/button";
 import { 
@@ -12,13 +9,13 @@ import {
   DropdownMenuTrigger
 } from "./ui/dropdown-menu";
 import { LucideMenu } from "lucide-react";
-import { SignInButton, UserButton } from "@clerk/nextjs";
+import { SignInButton, UserButton } from "@clerk/react";
 import { Authenticated, Unauthenticated } from "convex/react";
 import { useEffect, useState } from "react";
 import { Id } from "../convex/_generated/dataModel";
 
 export function Navbar() {
-  const pathname = usePathname();
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
   const { isAuthenticated } = useConvexAuth();
   const user = useQuery(api.auth.getMe);
   const permission = useQuery(api.auth.getUserPermission);
@@ -49,14 +46,14 @@ export function Navbar() {
     <header className="border-b border-border">
       <div className="w-full max-w-5xl mx-auto px-4 flex h-16 items-center justify-between">
         <div className="flex items-center gap-6">
-          <Link href="/" className="flex items-center">
+          <Link to="/" className="flex items-center">
             <img src="/image.png" alt="carlos's face" className="w-8 h-8 rounded-full object-cover mr-2" />
           </Link>
           <nav className="hidden md:flex gap-4">
             {navLinks.map((link) => (
               <Link
                 key={link.href}
-                href={link.href}
+                to={link.href}
                 className={
                   pathname === link.href
                     ? "text-foreground font-medium"
@@ -97,7 +94,7 @@ export function Navbar() {
                   {user.name || user.email}
                 </span>
               )}
-              <UserButton afterSignOutUrl="/" />
+              <UserButton />
             </div>
           </Authenticated>
           
@@ -119,7 +116,7 @@ export function Navbar() {
               <DropdownMenuContent align="end">
                 {navLinks.map((link) => (
                   <DropdownMenuItem key={link.href} asChild>
-                    <Link href={link.href}>{link.name}</Link>
+                    <Link to={link.href}>{link.name}</Link>
                   </DropdownMenuItem>
                 ))}
               </DropdownMenuContent>
