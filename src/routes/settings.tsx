@@ -1,6 +1,6 @@
 import { useQuery, useMutation } from "convex/react";
 import { api } from "../../convex/_generated/api";
-import { useNavigate } from "@tanstack/react-router";
+import { useNavigate, createFileRoute } from "@tanstack/react-router";
 import { Navbar } from "../../components/Navbar";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "../../components/ui/card";
 import { useEffect, useState } from "react";
@@ -10,7 +10,7 @@ import { Badge } from "../../components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../components/ui/tabs";
 import { Id } from "../../convex/_generated/dataModel";
 
-export default function OwnerPage() {
+function OwnerPage() {
   const navigate = useNavigate();
   const user = useQuery(api.auth.getMe);
   const permission = useQuery(api.auth.getUserPermission);
@@ -216,3 +216,7 @@ export default function OwnerPage() {
     </div>
   );
 }
+
+export const Route = createFileRoute('/settings')({
+  component: OwnerPage,
+})

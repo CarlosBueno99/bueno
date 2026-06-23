@@ -1,65 +1,63 @@
 services:
-  backend:
+  convex-backend:
     image: ghcr.io/get-convex/convex-backend:latest
     stop_grace_period: 10s
     stop_signal: SIGINT
+    restart: unless-stopped
     ports:
-      - "${PORT:-3210}:3210"
-      - "${SITE_PROXY_PORT:-3211}:3211"
+      - "${CONVEX_PORT:-3210}:3210"
+      - "${CONVEX_SITE_PROXY_PORT:-3211}:3211"
     volumes:
-      - data:/convex/data
-    environment:
-      - INSTANCE_NAME=${INSTANCE_NAME:-}
-      - INSTANCE_SECRET=${INSTANCE_SECRET:-}
-      - CONVEX_RELEASE_VERSION_DEV=${CONVEX_RELEASE_VERSION_DEV:-}
-      - ACTIONS_USER_TIMEOUT_SECS=${ACTIONS_USER_TIMEOUT_SECS:-}
-      - CONVEX_CLOUD_ORIGIN=https://backend.carlosbueno.xyz
-      - CONVEX_SITE_ORIGIN=https://api.carlosbueno.xyz
-      - DATABASE_URL=${DATABASE_URL:-}
-      - DISABLE_BEACON=${DISABLE_BEACON:-}
-      - REDACT_LOGS_TO_CLIENT=${REDACT_LOGS_TO_CLIENT:-}
-      - DO_NOT_REQUIRE_SSL=${DO_NOT_REQUIRE_SSL:-}
-      - POSTGRES_URL=${POSTGRES_URL:-}
-      - MYSQL_URL=${MYSQL_URL:-}
-      - RUST_LOG=${RUST_LOG:-info}
-      - RUST_BACKTRACE=${RUST_BACKTRACE:-}
-      - AWS_REGION=${AWS_REGION:-}
-      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
-      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
-      - AWS_SESSION_TOKEN=${AWS_SESSION_TOKEN:-}
-      - S3_STORAGE_EXPORTS_BUCKET=${S3_STORAGE_EXPORTS_BUCKET:-}
-      - S3_STORAGE_SNAPSHOT_IMPORTS_BUCKET=${S3_STORAGE_SNAPSHOT_IMPORTS_BUCKET:-}
-      - S3_STORAGE_MODULES_BUCKET=${S3_STORAGE_MODULES_BUCKET:-}
-      - S3_STORAGE_FILES_BUCKET=${S3_STORAGE_FILES_BUCKET:-}
-      - S3_STORAGE_SEARCH_BUCKET=${S3_STORAGE_SEARCH_BUCKET:-}
-      - S3_ENDPOINT_URL=${S3_ENDPOINT_URL:-}
-
+      - convex-data:/convex/data
+    env_file:
+      - .env.convex
     healthcheck:
       test: curl -f http://localhost:3210/version
       interval: 5s
       start_period: 10s
 
-  dashboard:
+  convex-dashboard:
     image: ghcr.io/get-convex/convex-dashboard:latest
     stop_grace_period: 10s
     stop_signal: SIGINT
+    restart: unless-stopped
     ports:
       - "${DASHBOARD_PORT:-6791}:6791"
     environment:
       - NEXT_PUBLIC_DEPLOYMENT_URL=https://backend.carlosbueno.xyz
     depends_on:
-      backend:
+      convex-backend:
         condition: service_healthy
 
-  carlosbueno:
+  api:
     build:
-      context: .
+      context: ..
       dockerfile: Dockerfile
+    restart: unless-stopped
     ports:
       - "3000:3000"
-    restart: unless-stopped
     env_file:
-      - .env.local
+      - ../.env.local
+    depends_on:
+      convex-backend:
+        condition: service_healthy
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+      # Uncomment to serve frontend static files from the host:
+      # - /var/www:/var/www
+    depends_on:
+      - api
 
 volumes:
-  data:
+  convex-data:
+  caddy-data:
+  caddy-config:

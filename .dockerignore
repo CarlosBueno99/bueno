@@ -1,8 +1,10 @@
-.git
-.next
 node_modules
-.env*
-!.env.example
-README.md
-docs/
+dist
+.git
+.gitignore
 *.md
+.env
+.env.local
+.env.convex
+.cursor
+.vercel

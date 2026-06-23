@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useAction } from "convex/react";
 import { api } from "../../convex/_generated/api";
-import { useNavigate, useSearch } from "@tanstack/react-router";
+import { useNavigate, createFileRoute } from "@tanstack/react-router";
+import { API_BASE } from "../lib/api";
 import { Navbar } from "../../components/Navbar";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "../../components/ui/card";
 import { useEffect, useState, Suspense } from "react";
@@ -15,7 +16,7 @@ function AdminPage() {
   const user = useQuery(api.auth.getMe);
   const permission = useQuery(api.auth.getUserPermission);
   const updateUserPermission = useMutation(api.auth.updateUserPermission);
-  const searchParams = useSearch({ from: '/admin' });
+  const searchParams = Route.useSearch();
   const triggerSpotifyRefresh = useAction(api.spotify.triggerSpotifyRefresh);
   const fetchMatchShareCodes = useAction(api.cs2Actions.fetchMatchShareCodes);
   const saveMatchResults = useMutation(api.cs2Actions.saveMatchResults);
@@ -120,7 +121,7 @@ function AdminPage() {
     setCs2Error("");
     setDemoUrl("");
     try {
-      const response = await fetch(`/api/cs/download?shareCode=${encodeURIComponent(shareCode)}`);
+      const response = await fetch(`${API_BASE}/api/cs/download?shareCode=${encodeURIComponent(shareCode)}`);
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Failed to fetch demo URL");
       if (data.demoUrl) setDemoUrl(data.demoUrl);
@@ -152,7 +153,7 @@ function AdminPage() {
         return;
       }
       const targetId = shareCodesResult.steamId || effectiveTargetId;
-      const response = await fetch(`/api/cs/matches?shareCodes=${shareCodesResult.shareCodes.join(',')}&targetSteamId=${targetId}`);
+      const response = await fetch(`${API_BASE}/api/cs/matches?shareCodes=${shareCodesResult.shareCodes.join(',')}&targetSteamId=${targetId}`);
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Failed to fetch demo URLs");
       if (data.matches && data.matches.length > 0) {
@@ -309,7 +310,7 @@ function AdminPage() {
                     <Button variant="outline" onClick={() => { if (user?._id) { triggerSpotifyRefresh({ userId: user._id }); setSuccessMessage("Refreshing Spotify data..."); } }}>Refresh Data Now</Button>
                     <Button variant="outline" onClick={() => {
                       const clientId = import.meta.env.VITE_SPOTIFY_CLIENT_ID || "<YOUR_SPOTIFY_CLIENT_ID>";
-                      const redirectUri = encodeURIComponent(`${window.location.origin}/api/spotify-callback`);
+                      const redirectUri = encodeURIComponent(`${API_BASE || window.location.origin}/api/spotify-callback`);
                       const scopes = encodeURIComponent("user-top-read user-read-email user-read-recently-played user-read-currently-playing");
                       window.location.href = `https://accounts.spotify.com/authorize?client_id=${clientId}&response_type=code&redirect_uri=${redirectUri}&scope=${scopes}`;
                     }}>Reconnect</Button>
@@ -326,7 +327,7 @@ function AdminPage() {
                   </div>
                   <Button onClick={() => {
                     const clientId = import.meta.env.VITE_SPOTIFY_CLIENT_ID || "<YOUR_SPOTIFY_CLIENT_ID>";
-                    const redirectUri = encodeURIComponent(`${window.location.origin}/api/spotify-callback`);
+                    const redirectUri = encodeURIComponent(`${API_BASE || window.location.origin}/api/spotify-callback`);
                     const scopes = encodeURIComponent("user-top-read user-read-email user-read-recently-played user-read-currently-playing");
                     window.location.href = `https://accounts.spotify.com/authorize?client_id=${clientId}&response_type=code&redirect_uri=${redirectUri}&scope=${scopes}`;
                   }}>Connect to Spotify</Button>
@@ -497,10 +498,18 @@ function AdminPage() {
   );
 }
 
-export default function AdminPageWrapper() {
+function AdminPageWrapper() {
   return (
     <Suspense>
       <AdminPage />
     </Suspense>
   );
 }
+
+export const Route = createFileRoute('/admin')({
+  validateSearch: (search: Record<string, unknown>) => ({
+    spotify: search.spotify as string | undefined,
+    error: search.error as string | undefined,
+  }),
+  component: AdminPageWrapper,
+})

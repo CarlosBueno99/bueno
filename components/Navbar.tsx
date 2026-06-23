@@ -13,6 +13,7 @@ import { SignInButton, UserButton } from "@clerk/react";
 import { Authenticated, Unauthenticated } from "convex/react";
 import { useEffect, useState } from "react";
 import { Id } from "../convex/_generated/dataModel";
+import { ThemeToggle } from "./ThemeToggle";
 
 export function Navbar() {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
@@ -23,6 +24,7 @@ export function Navbar() {
   const navLinks = [
     { name: "Home", href: "/" },
     { name: "Lucky Numbers", href: "/lucky-numbers" },
+    { name: "Brand", href: "/brand" },
   ];
 
   // Permission-based links
@@ -105,7 +107,9 @@ export function Navbar() {
               </Button>
             </SignInButton>
           </Unauthenticated>
-          
+
+          <ThemeToggle />
+
           <div className="md:hidden">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>

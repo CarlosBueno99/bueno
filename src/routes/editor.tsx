@@ -1,6 +1,6 @@
 import { useQuery, useMutation } from "convex/react";
 import { api } from "../../convex/_generated/api";
-import { useNavigate } from "@tanstack/react-router";
+import { useNavigate, createFileRoute } from "@tanstack/react-router";
 import { Navbar } from "../../components/Navbar";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "../../components/ui/card";
 import { useEffect, useState } from "react";
@@ -8,7 +8,7 @@ import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import { Id } from "../../convex/_generated/dataModel";
 
-export default function EditorPage() {
+function EditorPage() {
   const navigate = useNavigate();
   const user = useQuery(api.auth.getMe);
   const permission = useQuery(api.auth.getUserPermission);
@@ -132,3 +132,7 @@ export default function EditorPage() {
     return <div>Something went wrong. Please try again later.</div>;
   }
 }
+
+export const Route = createFileRoute('/editor')({
+  component: EditorPage,
+})

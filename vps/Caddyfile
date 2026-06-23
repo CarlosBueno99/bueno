@@ -1,15 +1,23 @@
+# Main app — reverse-proxy to backend API.
+# If hosting the frontend on this VPS, serve static files instead:
+#   cool.carlosbueno.xyz {
+#       root * /var/www/cool.carlosbueno.xyz
+#       file_server
+#       @api path /api/*
+#       reverse_proxy @api api:3000
+#   }
 cool.carlosbueno.xyz {
-	reverse_proxy localhost:3000
+    reverse_proxy api:3000
 }
 
 backend.carlosbueno.xyz {
-	reverse_proxy localhost:3210
+    reverse_proxy convex-backend:3210
 }
 
-api.carlsobueno.xyz {
-    reverse_proxy localhost:3211
+api.carlosbueno.xyz {
+    reverse_proxy convex-backend:3211
 }
 
 dashboard.carlosbueno.xyz {
-	reverse_proxy localhost:6791
+    reverse_proxy convex-dashboard:6791
 }

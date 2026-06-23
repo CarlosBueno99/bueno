@@ -1,3 +1,4 @@
+import { createFileRoute } from '@tanstack/react-router'
 import { useQuery, useMutation, useConvexAuth, useAction } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { Navbar } from "../../components/Navbar";
@@ -84,7 +85,7 @@ function FloatingNowPlaying() {
   );
 }
 
-export default function Home() {
+function Home() {
   const { isAuthenticated } = useConvexAuth();
   const createUser = useMutation(api.auth.createUser);
 
@@ -353,3 +354,7 @@ function DashboardContent() {
     return <div>Something went wrong loading your dashboard.</div>;
   }
 }
+
+export const Route = createFileRoute('/')({
+  component: Home,
+})

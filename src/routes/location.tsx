@@ -1,3 +1,4 @@
+import { createFileRoute } from '@tanstack/react-router'
 import { useEffect, useState, useRef } from "react";
 import { useQuery, useAction } from "convex/react";
 import { api } from "../../convex/_generated/api";
@@ -26,7 +27,7 @@ function extractCoordinatesFromAppleMapsUrl(url: string) {
   }
 }
 
-export default function LocationHistoryPage() {
+function LocationHistoryPage() {
   const user = useQuery(api.auth.getMe);
   const permission = useQuery(api.auth.getUserPermission);
   const [searchAddress, setSearchAddress] = useState("");
@@ -209,3 +210,7 @@ export default function LocationHistoryPage() {
     </div>
   );
 }
+
+export const Route = createFileRoute('/location')({
+  component: LocationHistoryPage,
+})

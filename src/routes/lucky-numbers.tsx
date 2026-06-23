@@ -1,9 +1,10 @@
+import { createFileRoute } from '@tanstack/react-router'
 import { useEffect, useState } from "react";
 import { Button } from "../../components/ui/button";
 import { Navbar } from "../../components/Navbar";
 import { Card, CardContent } from "../../components/ui/card";
 
-export default function LuckyNumbersPage() {
+function LuckyNumbersPage() {
   const [luckyNumbers, setLuckyNumbers] = useState<number[]>([]);
   const [quinaNumbers, setQuinaNumbers] = useState<number[]>([]);
   const [copiedMega, setCopiedMega] = useState(false);
@@ -95,3 +96,7 @@ export default function LuckyNumbersPage() {
     </div>
   );
 }
+
+export const Route = createFileRoute('/lucky-numbers')({
+  component: LuckyNumbersPage,
+})

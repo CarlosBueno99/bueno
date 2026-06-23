@@ -24,19 +24,37 @@ pnpm dev
 
 The Vite dev server runs on `http://localhost:5173` with API requests proxied to the Hono server on `http://localhost:3000`.
 
-### Production Build
+### Production — Decoupled Deployment
+
+The frontend and backend are independent services. Deploy them separately:
+
+**Option A: Frontend to static host, Backend to Docker/VPS**
 
 ```bash
-pnpm build          # builds Vite client to dist/static/
-pnpm start          # runs Hono server serving the static build
+# Build frontend
+pnpm build                    # outputs to dist/static/
+# Set VITE_API_URL at build time:
+VITE_API_URL=https://api.example.com pnpm build
+
+# Deploy dist/static/ to any static host (Vercel, Netlify, Cloudflare Pages, S3)
+
+# Build and run backend (API-only)
+docker build -t bueno-api .
+docker run -p 3000:3000 --env-file .env.local \
+  -e FRONTEND_URL=https://cool.example.com \
+  bueno-api
 ```
 
-Or via Docker:
+**Option B: Full stack on a VPS**
 
 ```bash
-docker build -t bueno .
-docker run -p 3000:3000 --env-file .env.local bueno
+cd vps
+cp ../.env.local.example ../.env.local   # fill in secrets
+cp .env.convex.example .env.convex       # fill in Convex backend config
+docker compose up -d                      # starts API + Convex + Caddy
 ```
+
+See `vps/docker-compose.yml` and `vps/Caddyfile` for the full setup.
 
 ---
 
@@ -73,10 +91,10 @@ docker run -p 3000:3000 --env-file .env.local bueno
 - **Location Tracking**: GPS location history from external devices (e.g., iOS Shortcuts)
 - **Lucky Numbers**: Random number generator for lottery games (Mega-Sena, Quina)
 
-The application uses a **hybrid architecture**:
-- **Vite + React SPA** handles the frontend UI with TanStack Router for client-side routing
-- **Hono (Node.js)** serves the API layer, including Steam GC connections, OAuth callbacks, and static file serving
-- **Convex** serves as the primary backend for real-time data, authentication, database operations, and scheduled jobs
+The application uses a **decoupled architecture**:
+- **Vite + React SPA** handles the frontend UI with TanStack Router for client-side routing. Deployable to any static host.
+- **Hono (Node.js)** serves the API layer, including Steam GC connections and OAuth callbacks. Deployable to any Docker/Node host.
+- **Convex** serves as the primary backend for real-time data, authentication, database operations, and scheduled jobs.
 
 This split exists because some operations (like Steam Game Coordinator connections) require persistent sockets and Node.js-specific libraries that Convex’s serverless environment cannot support.
 
@@ -90,7 +108,7 @@ This split exists because some operations (like Steam Game Coordinator connectio
 | **Styling** | Tailwind CSS v4 + shadcn/ui | Utility-first CSS, component primitives |
 | **Authentication** | Clerk | OAuth providers, session management, JWT tokens |
 | **Backend (Database)** | Convex | Real-time database, queries, mutations, actions, cron jobs |
-| **Backend (API Server)** | Hono (Node.js) | Steam GC connections, OAuth callbacks, static file serving |
+| **Backend (API Server)** | Hono (Node.js) | Steam GC connections, OAuth callbacks |
 | **Maps** | Leaflet + OpenStreetMap | Client-side map rendering and geocoding |
 | **Package Manager** | pnpm | Dependency management |
 | **External APIs** | Spotify, Steam Web API, Steam GC | Third-party data sources |
@@ -1434,9 +1452,10 @@ flowchart TD
 | Concern | Where Handled | Rationale |
 | --- | --- | --- |
 | **Steam GC Connection** | Hono API (Node.js) | Requires persistent socket, `steam-user` npm package, Node.js runtime |
+| **Static File Serving** | Frontend host (Vercel, Caddy, etc.) | Backend is API-only; frontend is decoupled |
 | **Steam Login Credentials** | Hono env vars | Only the API route needs them; never exposed to browser |
 | **Spotify Token Exchange** | Convex Action | Token exchange + DB save happen atomically; token never leaves server |
-| **OAuth Callbacks** | Hono API Route | OAuth providers redirect to URL endpoints, not WebSocket |
+| **OAuth Callbacks** | Hono API Route | OAuth providers redirect to URL endpoints; redirects back to `FRONTEND_URL` |
 | **Database Operations** | Convex | Transactional consistency, real-time subscriptions, automatic scaling |
 | **User Settings** | Convex | Protected by authentication, stored per-user |
 | **Steam Web API** | Convex Action | API key stays server-side; simpler HTTP calls |
@@ -1460,6 +1479,9 @@ flowchart TD
 ### .env.local (shared between client and server)
 
 ```bash
+# Backend API origin (empty = same-origin, set when deploying separately)
+VITE_API_URL=
+
 # Convex connection
 VITE_CONVEX_URL=https://your-deployment.convex.cloud
 
@@ -1469,12 +1491,18 @@ VITE_CLERK_PUBLISHABLE_KEY=pk_test_your_clerk_publishable_key
 # Spotify OAuth (public = used in client redirect URL)
 VITE_SPOTIFY_CLIENT_ID=your_spotify_client_id
 
+# Frontend origin (for CORS and OAuth redirects)
+FRONTEND_URL=https://cool.example.com
+
 # Steam GC credentials (server-side only, read from same file)
 STEAM_USERNAME=your_steam_username
 STEAM_PASSWORD=your_steam_password
 
 # Internal secret for CS2 demo archive endpoint
 CS2_ARCHIVE_INTERNAL_SECRET=your-internal-secret
+
+# Location API key for external device authentication
+LOCATION_API_KEY=your-location-api-key
 ```
 
 Variables prefixed with `VITE_` are bundled into the client at build time. The rest are server-only.
@@ -1507,15 +1535,17 @@ CS2_DEMOS_S3_PATH=s3://your-bucket-name/optional-prefix
 
 ## Summary
 
-**Bueno Dashboard** uses a hybrid architecture optimized for:
+**Bueno Dashboard** uses a decoupled architecture optimized for:
 
 1. **Security**: Sensitive credentials never exposed to client; all secrets in server-side environment variables
 2. **Real-time Updates**: Convex provides instant UI updates via WebSocket subscriptions
 3. **Performance**: Cron jobs pre-cache external API data, reducing latency and API rate limit usage
 4. **Flexibility**: Hono API server handles operations requiring Node.js runtime features (Steam GC)
-5. **Maintainability**: Clear separation between client, API routes, and Convex functions
-6. **Privacy**: Location data protected by role-based permissions
+5. **Maintainability**: Clear separation between frontend, API server, and Convex functions
+6. **Deployability**: Frontend deploys to any static host; backend deploys to any Docker/Node host
+7. **Privacy**: Location data protected by role-based permissions
 
-The split between Convex and the Hono API server is intentional:
+The split between the three layers is intentional:
+- **Frontend (Vite + React)**: Pure SPA, deployable to Vercel, Netlify, Cloudflare Pages, or served statically
 - **Convex**: Best for database operations, real-time queries, scheduled jobs, simple HTTP API calls
 - **Hono (Node.js)**: Required for OAuth callbacks (URL-based), Steam GC (persistent socket + Node.js libraries)

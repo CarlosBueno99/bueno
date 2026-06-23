@@ -29,6 +29,7 @@ yarn-error.log*
 # env files
 .env*
 !.env.local.example
+!.env.convex.example
 
 # lockfiles (using pnpm)
 package-lock.json
@@ -45,3 +46,6 @@ bun.lock
 
 node_modules/
 dist/
+
+# generated
+src/routeTree.gen.ts

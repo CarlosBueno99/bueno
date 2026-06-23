@@ -1,5 +1,9 @@
-import { Outlet } from '@tanstack/react-router'
+import { createRootRoute, Outlet } from '@tanstack/react-router'
 
-export default function RootLayout() {
+function RootLayout() {
   return <Outlet />
 }
+
+export const Route = createRootRoute({
+  component: RootLayout,
+})

@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client'
 import { RouterProvider, createRouter } from '@tanstack/react-router'
 import { ClerkProvider } from '@clerk/react'
 import ConvexClientProvider from './providers/ConvexClientProvider'
-import { routeTree } from './routeTree'
+import { routeTree } from './routeTree.gen'
 import './globals.css'
 
 const router = createRouter({ routeTree })
@@ -21,7 +21,7 @@ if (!publishableKey) {
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <ClerkProvider publishableKey={publishableKey}>
+    <ClerkProvider publishableKey={publishableKey} afterSignOutUrl="/">
       <ConvexClientProvider>
         <RouterProvider router={router} />
       </ConvexClientProvider>

@@ -169,88 +169,83 @@ export const downloadPendingDemos = internalAction({
       },
     });
     
-    let successful = 0;
-    let failed = 0;
-    const errors: string[] = [];
-    
-    for (const match of pendingMatches) {
-      try {
-        // Generate filename
-        const filename = generateDemoFilename(
-          match.steamId,
-          match.matchTime,
-          match.teamScores,
-          match.matchResult,
-          match.targetPlayerTeam,
-          match.shareCode
-        );
-        
-        const s3Key = prefix ? `${prefix}/${filename}` : filename;
-        const s3Uri = `s3://${bucket}/${s3Key}`;
-        
-        console.log(`Archiving ${match.shareCode} as ${filename}...`);
-        
-        // Download the demo file from Valve CDN
-        const downloadResponse = await fetch(match.demoUrl);
-        
-        if (!downloadResponse.ok) {
-          // Handle expired demos (502, 404, etc.)
-          if (downloadResponse.status === 502 || downloadResponse.status === 404 || downloadResponse.status === 410) {
-            throw new Error(`Demo expired or unavailable (HTTP ${downloadResponse.status})`);
+    const concurrency = Math.min(
+      Number(process.env.CONCURRENT_ARCHIVES) || 3,
+      pendingMatches.length
+    );
+
+    const results: { match: PendingMatch; error?: string }[] = []
+    const queue = [...pendingMatches]
+
+    async function worker() {
+      while (queue.length > 0) {
+        const match = queue.shift()!
+        try {
+          const filename = generateDemoFilename(
+            match.steamId,
+            match.matchTime,
+            match.teamScores,
+            match.matchResult,
+            match.targetPlayerTeam,
+            match.shareCode
+          )
+
+          const s3Key = prefix ? `${prefix}/${filename}` : filename
+          const s3Uri = `s3://${bucket}/${s3Key}`
+
+          console.log(`Archiving ${match.shareCode} as ${filename}...`)
+
+          const downloadResponse = await fetch(match.demoUrl)
+
+          if (!downloadResponse.ok) {
+            if (downloadResponse.status === 502 || downloadResponse.status === 404 || downloadResponse.status === 410) {
+              throw new Error(`Demo expired or unavailable (HTTP ${downloadResponse.status})`)
+            }
+            throw new Error(`Failed to download demo: HTTP ${downloadResponse.status}`)
           }
-          throw new Error(`Failed to download demo: HTTP ${downloadResponse.status}`);
-        }
-        
-        if (!downloadResponse.body) {
-          throw new Error('No response body from Valve CDN');
-        }
-        
-        // Convert web stream to Node.js stream for S3 upload
-        const nodeStream = webStreamToNodeStream(downloadResponse.body);
-        
-        // Stream upload to S3 using lib-storage (handles multipart automatically)
-        const upload = new Upload({
-          client: s3Client,
-          params: {
-            Bucket: bucket,
-            Key: s3Key,
-            Body: nodeStream,
-            ContentType: 'application/x-bzip2',
-          },
-          // Use 5MB parts for multipart upload
-          partSize: 5 * 1024 * 1024,
-          // Upload up to 4 parts concurrently
-          queueSize: 4,
-        });
-        
-        // Track progress
-        upload.on('httpUploadProgress', (progress) => {
-          if (progress.loaded) {
-            console.log(`  Uploaded ${(progress.loaded / 1024 / 1024).toFixed(2)} MB...`);
+
+          if (!downloadResponse.body) {
+            throw new Error('No response body from Valve CDN')
           }
-        });
-        
-        await upload.done();
-        
-        // Update the match with S3 key
-        await ctx.runMutation(internal.cs2Actions.updateMatchS3Key, {
-          matchId: match._id,
-          s3ObjectKey: s3Uri,
-        });
-        
-        console.log(`Successfully archived ${match.shareCode} to ${s3Uri}`);
-        successful++;
-      } catch (error) {
-        const errorMsg = `Error archiving ${match.shareCode}: ${error instanceof Error ? error.message : String(error)}`;
-        console.error(errorMsg);
-        errors.push(errorMsg);
-        failed++;
+
+          const nodeStream = webStreamToNodeStream(downloadResponse.body)
+
+          const upload = new Upload({
+            client: s3Client,
+            params: {
+              Bucket: bucket,
+              Key: s3Key,
+              Body: nodeStream,
+              ContentType: 'application/x-bzip2',
+            },
+            partSize: 5 * 1024 * 1024,
+            queueSize: 4,
+          })
+
+          await upload.done()
+
+          await ctx.runMutation(internal.cs2Actions.updateMatchS3Key, {
+            matchId: match._id,
+            s3ObjectKey: s3Uri,
+          })
+
+          console.log(`Successfully archived ${match.shareCode} to ${s3Uri}`)
+          results.push({ match })
+        } catch (error) {
+          const errorMsg = `Error archiving ${match.shareCode}: ${error instanceof Error ? error.message : String(error)}`
+          console.error(errorMsg)
+          results.push({ match, error: errorMsg })
+        }
       }
-      
-      // Small delay between downloads to be nice to Valve's CDN
-      await new Promise(r => setTimeout(r, 1000));
     }
-    
-    return { processed: pendingMatches.length, successful, failed, errors };
+
+    const workers = Array.from({ length: concurrency }, () => worker())
+    await Promise.all(workers)
+
+    const successful = results.filter((r) => !r.error).length
+    const failed = results.filter((r) => r.error).length
+    const errors = results.filter((r): r is { match: PendingMatch; error: string } => !!r.error).map((r) => r.error)
+
+    return { processed: pendingMatches.length, successful, failed, errors }
   },
 });

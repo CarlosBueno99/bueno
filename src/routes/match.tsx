@@ -1,3 +1,5 @@
+import { createFileRoute } from '@tanstack/react-router'
+import { API_BASE } from "../lib/api";
 import { useState, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../../components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../components/ui/tabs";
@@ -75,7 +77,7 @@ interface MatchStats {
   chatMessages?: ChatMessage[];
 }
 
-export default function MatchPage() {
+function MatchPage() {
   const [matchStats, setMatchStats] = useState<MatchStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -83,7 +85,7 @@ export default function MatchPage() {
   useEffect(() => {
     async function fetchMatchData() {
       try {
-        const response = await fetch('/api/cs');
+        const response = await fetch(`${API_BASE}/api/cs`);
         if (!response.ok) {
           throw new Error('Failed to fetch match data');
         }
@@ -382,4 +384,8 @@ export default function MatchPage() {
       </Tabs>
     </div>
   );
-} 
+}
+
+export const Route = createFileRoute('/match')({
+  component: MatchPage,
+})
