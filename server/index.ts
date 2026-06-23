@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
-import { serveStatic } from 'hono/bun'
-import { clerkMiddleware, getAuth } from '@hono/clerk-auth'
+import { serve } from '@hono/node-server'
+import { serveStatic } from '@hono/node-server/serve-static'
+import { clerkMiddleware, getAuth } from '@clerk/hono'
 import { ConvexHttpClient } from 'convex/browser'
 import { ConvexError } from 'convex/values'
 import { api } from '../convex/_generated/api'
@@ -160,40 +161,70 @@ app.get('/api/cs/matches', async (c) => {
     })
   }
 
+  console.log(`[cs/matches] Starting request for ${shareCodes.length} share codes`)
+
   return new Promise<Response>((resolve) => {
     const client = new SteamUser()
     const csgo = new GlobalOffensive(client)
     let resolved = false
     const cleanup = () => { try { client.logOff() } catch {} }
 
+    console.log('[cs/matches] Logging into Steam...')
     client.logOn({ accountName: username, password })
-    client.on('loggedOn', () => { client.setPersona(SteamUser.EPersonaState.Online); client.gamesPlayed([730]) })
+
+    client.on('loggedOn', () => {
+      console.log('[cs/matches] Logged into Steam as', client.steamID?.getSteam3RenderedID?.())
+      client.setPersona(SteamUser.EPersonaState.Online)
+      client.gamesPlayed([730])
+    })
+
     client.on('error', (err: any) => {
+      console.error('[cs/matches] Steam login error:', err)
       if (!resolved) { resolved = true; resolve(c.json({ error: 'Steam login error: ' + (err?.message || String(err)) }, 500)) }
     })
+
     csgo.on('connectedToGC', async () => {
+      console.log('[cs/matches] Connected to CS2 GC, processing', shareCodes.length, 'share codes')
       try {
         const results = []
         for (const code of shareCodes) {
-          results.push(await getDemoUrlForShareCode(csgo, code, 10000))
+          console.log(`[cs/matches] Requesting game for: ${code}`)
+          const result = await getDemoUrlForShareCode(csgo, code, 10000)
+          console.log(`[cs/matches] Result for ${code}:`, result.demoUrl ? 'got URL' : (result.error ?? 'no URL'))
+          results.push(result)
           await new Promise(r => setTimeout(r, 500))
         }
         if (!resolved) {
           resolved = true
           const matches = results.map((r, index) => ({ index, ...r }))
-          resolve(c.json({ success: true, total: matches.length, successCount: matches.filter((m: any) => m.demoUrl).length, matches }))
+          const successCount = matches.filter((m: any) => m.demoUrl).length
+          console.log(`[cs/matches] Done — ${successCount}/${matches.length} succeeded`)
+          resolve(c.json({ success: true, total: matches.length, successCount, matches }))
         }
         cleanup()
       } catch (error) {
+        console.error('[cs/matches] Error in connectedToGC handler:', error)
         if (!resolved) { resolved = true; resolve(c.json({ error: 'Error fetching demo URLs: ' + (error instanceof Error ? error.message : String(error)) }, 500)) }
         cleanup()
       }
     })
+
+    csgo.on('disconnectedFromGC', (reason: any) => {
+      console.warn('[cs/matches] Disconnected from GC, reason:', reason)
+    })
+
     csgo.on('error', (err: any) => {
+      console.error('[cs/matches] CS2 GC error:', err)
       if (!resolved) { resolved = true; resolve(c.json({ error: 'CS2 GC error: ' + (err?.message || String(err)) }, 500)); cleanup() }
     })
+
     setTimeout(() => {
-      if (!resolved) { resolved = true; resolve(c.json({ error: 'Timeout waiting for demo URLs.' }, 504)); cleanup() }
+      if (!resolved) {
+        console.warn('[cs/matches] 120s timeout hit — never connected to GC or finished processing')
+        resolved = true
+        resolve(c.json({ error: 'Timeout waiting for demo URLs.' }, 504))
+        cleanup()
+      }
     }, 120000)
   })
 })
@@ -318,18 +349,22 @@ app.use('/*', serveStatic({ root: './dist/static' }))
 // SPA fallback: serve index.html for all non-API routes
 app.get('/*', async (c) => {
   try {
-    const html = await Bun.file('./dist/static/index.html').text()
+    const html = await fs.readFile('./dist/static/index.html', 'utf-8')
     return c.html(html)
   } catch {
     return c.text('Not found', 404)
   }
 })
 
-const port = Number(process.env.PORT) || 3000
-console.log(`Server running on http://0.0.0.0:${port}`)
+process.on('uncaughtException', (err) => {
+  console.error('[uncaughtException]', err)
+})
+process.on('unhandledRejection', (reason) => {
+  console.error('[unhandledRejection]', reason)
+})
 
-export default {
-  port,
-  hostname: '0.0.0.0',
-  fetch: app.fetch,
-}
+const port = Number(process.env.PORT) || 3000
+
+serve({ fetch: app.fetch, port }, () => {
+  console.log(`Server running on http://0.0.0.0:${port}`)
+})

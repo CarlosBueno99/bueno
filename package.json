@@ -3,19 +3,20 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "concurrently \"vite\" \"bun run server/index.ts\"",
+    "dev": "concurrently \"vite\" \"tsx watch --env-file=.env.local server/index.ts\"",
     "dev:client": "vite",
-    "dev:server": "bun run --watch server/index.ts",
+    "dev:server": "tsx watch --env-file=.env.local server/index.ts",
     "build": "vite build",
-    "start": "bun run server/index.ts",
+    "start": "node --env-file=.env.local --import tsx/esm server/index.ts",
     "preview": "vite preview"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.975.0",
     "@aws-sdk/lib-storage": "^3.978.0",
     "@clerk/backend": "^3.2.13",
+    "@clerk/hono": "^0.1.15",
     "@clerk/react": "^6.4.2",
-    "@hono/clerk-auth": "^3.1.1",
+    "@hono/node-server": "^2.0.0",
     "@hookform/resolvers": "^5.0.1",
     "@radix-ui/react-avatar": "^1.1.7",
     "@radix-ui/react-dialog": "^1.1.11",
@@ -54,6 +55,7 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "tailwindcss": "^4",
+    "tsx": "^4.21.0",
     "tw-animate-css": "^1.2.8",
     "typescript": "^5"
   }

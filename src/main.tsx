@@ -4,7 +4,7 @@ import { RouterProvider, createRouter } from '@tanstack/react-router'
 import { ClerkProvider } from '@clerk/react'
 import ConvexClientProvider from './providers/ConvexClientProvider'
 import { routeTree } from './routeTree'
-import '../app/globals.css'
+import './globals.css'
 
 const router = createRouter({ routeTree })
 

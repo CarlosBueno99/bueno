@@ -1,6 +1,44 @@
-# ARCHITECTURE
+# Bueno Dashboard
 
-# Bueno Dashboard - Architecture Documentation
+Personal dashboard that aggregates data from Spotify, Steam/CS2, GPS location tracking, and more.
+
+---
+
+## Quick Start
+
+```bash
+# 1. Clone and install
+git clone <repo-url>
+cd bueno
+pnpm install
+
+# 2. Set up environment
+cp .env.local.example .env.local   # or create from scratch (see Environment Variables below)
+
+# 3. Start Convex backend (separate terminal)
+npx convex dev
+
+# 4. Run the app (client + server concurrently)
+pnpm dev
+```
+
+The Vite dev server runs on `http://localhost:5173` with API requests proxied to the Hono server on `http://localhost:3000`.
+
+### Production Build
+
+```bash
+pnpm build          # builds Vite client to dist/static/
+pnpm start          # runs Hono server serving the static build
+```
+
+Or via Docker:
+
+```bash
+docker build -t bueno .
+docker run -p 3000:3000 --env-file .env.local bueno
+```
+
+---
 
 ## Table of Contents
 
@@ -36,7 +74,8 @@
 - **Lucky Numbers**: Random number generator for lottery games (Mega-Sena, Quina)
 
 The application uses a **hybrid architecture**:
-- **Next.js** handles the frontend UI and specific API routes requiring Node.js runtime features
+- **Vite + React SPA** handles the frontend UI with TanStack Router for client-side routing
+- **Hono (Node.js)** serves the API layer, including Steam GC connections, OAuth callbacks, and static file serving
 - **Convex** serves as the primary backend for real-time data, authentication, database operations, and scheduled jobs
 
 This split exists because some operations (like Steam Game Coordinator connections) require persistent sockets and Node.js-specific libraries that Convex’s serverless environment cannot support.
@@ -47,19 +86,20 @@ This split exists because some operations (like Steam Game Coordinator connectio
 
 | Layer | Technology | Purpose |
 | --- | --- | --- |
-| **Frontend** | Next.js 14 + React 18 | Server-side rendering, routing, client components |
+| **Frontend** | Vite + React 19 + TanStack Router | SPA, client-side routing |
+| **Styling** | Tailwind CSS v4 + shadcn/ui | Utility-first CSS, component primitives |
 | **Authentication** | Clerk | OAuth providers, session management, JWT tokens |
-| **Backend (Primary)** | Convex | Real-time database, queries, mutations, actions, cron jobs |
-| **Backend (Secondary)** | Next.js API Routes | Steam GC socket connections, OAuth callbacks |
-| **Database** | Convex DB | Document storage with real-time subscriptions |
+| **Backend (Database)** | Convex | Real-time database, queries, mutations, actions, cron jobs |
+| **Backend (API Server)** | Hono (Node.js) | Steam GC connections, OAuth callbacks, static file serving |
 | **Maps** | Leaflet + OpenStreetMap | Client-side map rendering and geocoding |
+| **Package Manager** | pnpm | Dependency management |
 | **External APIs** | Spotify, Steam Web API, Steam GC | Third-party data sources |
 
 ---
 
 ## Feature Summary
 
-| Feature | Client | Next.js API | Convex | External API |
+| Feature | Client | API Server (Hono) | Convex | External API |
 | --- | --- | --- | --- | --- |
 | **Spotify OAuth** | Initiates redirect to Spotify | Receives callback, triggers Convex action | Exchanges code for tokens, saves refresh token | Spotify OAuth |
 | **Spotify Data (cached)** | Displays artists, genres, tracks via `useQuery` | — | Cron refreshes every 10 min, stores in `spotifyData` | Spotify `/me/top/artists`, `/me/player/recently-played` |
@@ -85,8 +125,8 @@ flowchart TB
         Dashboard[Dashboard<br/>Artists, Genres,<br/>Recent, Now Playing]
     end
 
-    subgraph nextjs [Next.js]
-        Callback[API: spotify-callback]
+    subgraph api [API Server (Hono)]
+        Callback[GET /api/spotify-callback]
     end
 
     subgraph convex [Convex]
@@ -200,9 +240,9 @@ flowchart TB
         SettingsUI[Settings Page<br/>Share Code + Auth Token]
     end
 
-    subgraph nextjs [Next.js]
-        DownloadAPI[API: cs/download]
-        MatchesAPI[API: cs/matches]
+    subgraph api [API Server (Hono)]
+        DownloadAPI[GET /api/cs/download]
+        MatchesAPI[GET /api/cs/matches]
         EnvVars[Environment Variables<br/>STEAM_USERNAME<br/>STEAM_PASSWORD]
     end
 
@@ -246,7 +286,7 @@ flowchart TB
 
 **Key Points:**
 
-- **Two-phase architecture**: Share codes via Convex action (Web API), Demo URLs via Next.js route (GC)
+- **Two-phase architecture**: Share codes via Convex action (Web API), Demo URLs via Hono API route (GC)
 - Steam GC requires persistent socket connection + Node.js `steam-user` library (not available in Convex)
 - User provides their own `lastShareCode` + `authToken` via Settings page
 - Steam login credentials (username/password/2FA secret) are server-side environment variables only
@@ -266,8 +306,8 @@ flowchart TB
         LocationPage[Location Page<br/>Map + History Table]
     end
 
-    subgraph nextjs [Next.js]
-        LocationAPI[POST API: location]
+    subgraph api [API Server (Hono)]
+        LocationAPI[POST /api/location]
     end
 
     subgraph convex [Convex]
@@ -298,7 +338,7 @@ flowchart TB
 
 **Key Points:**
 
-- External devices (iOS Shortcuts, Tasker, etc.) POST location data to Next.js endpoint
+- External devices (iOS Shortcuts, Tasker, etc.) POST location data to Hono API endpoint
 - Location viewing requires `owner` or `relatives` permission (privacy protection)
 - Map is rendered client-side with Leaflet (no server-side map generation)
 - Location records include optional fields: altitude, street, city, state, zip, region
@@ -463,7 +503,7 @@ sequenceDiagram
     actor User
     participant Browser
     participant Spotify as Spotify OAuth
-    participant NextJS as Next.js API
+    participant Hono as Hono API
     participant Convex
     participant DB as Convex DB
 
@@ -472,21 +512,21 @@ sequenceDiagram
     Note over Spotify: User sees Spotify login
 
     User->>Spotify: Approve permissions
-    Spotify->>NextJS: GET /api/spotify-callback?code=xxx
+    Spotify->>Hono: GET /api/spotify-callback?code=xxx
 
-    NextJS->>NextJS: Get Clerk JWT for current user
-    NextJS->>Convex: setAuth(jwt)
-    NextJS->>Convex: action: exchangeSpotifyCodeForToken(code)
+    Hono->>Hono: Get Clerk JWT for current user
+    Hono->>Convex: setAuth(jwt)
+    Hono->>Convex: action: exchangeSpotifyCodeForToken(code)
 
     activate Convex
     Convex->>Convex: Verify user identity via ctx.auth
     Convex->>Spotify: POST /api/token (code + client_secret)
     Spotify-->>Convex: { access_token, refresh_token }
     Convex->>DB: Save refresh_token to websiteSettings
-    Convex-->>NextJS: { success: true }
+    Convex-->>Hono: { success: true }
     deactivate Convex
 
-    NextJS-->>Browser: Redirect to /admin?spotify=connected
+    Hono-->>Browser: Redirect to /admin?spotify=connected
     Browser->>User: Show "Connected" success message
 ```
 
@@ -633,7 +673,7 @@ sequenceDiagram
     participant Convex
     participant DB as Convex DB
     participant SteamWeb as Steam Web API
-    participant NextJS as Next.js API
+    participant Hono as Hono API
     participant SteamGC as Steam GC
 
     User->>Browser: Click "Fetch Matches"
@@ -656,26 +696,26 @@ sequenceDiagram
     end
 
     rect rgb(255, 245, 230)
-        Note over Browser,SteamGC: Phase 2: Get Demo URLs (Next.js)
-        Browser->>NextJS: GET /api/cs/matches?codes=...
-        activate NextJS
+        Note over Browser,SteamGC: Phase 2: Get Demo URLs (Hono API)
+        Browser->>Hono: GET /api/cs/matches?codes=...
+        activate Hono
 
-        NextJS->>NextJS: Read STEAM_* env vars
-        NextJS->>SteamGC: Login (username, password, 2FA)
-        SteamGC-->>NextJS: Logged in
+        Hono->>Hono: Read STEAM_* env vars
+        Hono->>SteamGC: Login (username, password, 2FA)
+        SteamGC-->>Hono: Logged in
 
-        NextJS->>SteamGC: setPersona(ONLINE), gamesPlayed([730])
-        SteamGC-->>NextJS: connectedToGC event
+        Hono->>SteamGC: setPersona(ONLINE), gamesPlayed([730])
+        SteamGC-->>Hono: connectedToGC event
 
         loop For each shareCode
-            NextJS->>SteamGC: requestGame(shareCode)
-            SteamGC-->>NextJS: matchList event
-            NextJS->>NextJS: Extract demoUrl from response
+            Hono->>SteamGC: requestGame(shareCode)
+            SteamGC-->>Hono: matchList event
+            Hono->>Hono: Extract demoUrl from response
         end
 
-        NextJS->>SteamGC: logOff()
-        NextJS-->>Browser: matches[]
-        deactivate NextJS
+        Hono->>SteamGC: logOff()
+        Hono-->>Browser: matches[]
+        deactivate Hono
     end
 
     rect rgb(230, 255, 230)
@@ -696,7 +736,7 @@ sequenceDiagram
 sequenceDiagram
     autonumber
     participant Device as iOS Shortcut
-    participant NextJS as Next.js API
+    participant Hono as Hono API
     participant Convex
     participant DB as Convex DB
     participant Browser
@@ -705,21 +745,21 @@ sequenceDiagram
     Device->>Device: Automation triggered (e.g., arrive home)
     Device->>Device: Get current GPS coordinates
 
-    Device->>NextJS: POST /api/location
+    Device->>Hono: POST /api/location
     Note right of Device: { lat, lng, displayName, password }
 
-    activate NextJS
-    NextJS->>NextJS: Validate required fields
-    NextJS->>Convex: mutation: addLocation(data)
+    activate Hono
+    Hono->>Hono: Validate required fields
+    Hono->>Convex: mutation: addLocation(data)
 
     activate Convex
     Convex->>DB: Verify user exists
     Convex->>DB: Insert into locations table
-    Convex-->>NextJS: { id: locationId }
+    Convex-->>Hono: { id: locationId }
     deactivate Convex
 
-    NextJS-->>Device: 200 { success: true }
-    deactivate NextJS
+    Hono-->>Device: 200 { success: true }
+    deactivate Hono
 
     Note over Browser,OSM: Later: User views location history
 
@@ -882,7 +922,7 @@ flowchart TB
     end
 
     subgraph ServerLayer [Server Layer]
-        NextJS[Next.js API Routes]
+        Hono[Hono API (Node.js)]
         Convex[Convex Backend]
     end
 
@@ -899,16 +939,16 @@ flowchart TB
     end
 
     User -->|interacts| Browser
-    Device -->|POST location| NextJS
+    Device -->|POST location| Hono
 
     Browser <-->|queries, mutations, actions| Convex
-    Browser -->|fetch demos| NextJS
+    Browser -->|fetch demos| Hono
     Browser <-->|authentication| Clerk
     Browser -->|map tiles, geocoding| OSM
     Browser -->|OAuth redirect| Spotify
 
-    NextJS -->|mutations| Convex
-    NextJS <-->|GC protocol| SteamGC
+    Hono -->|mutations| Convex
+    Hono <-->|GC protocol| SteamGC
 
     Convex -->|cron jobs| Convex
     Convex <-->|OAuth, data| Spotify
@@ -936,8 +976,8 @@ flowchart LR
         MatchQuery[getMyMatches]
     end
 
-    subgraph NextJSSvc [Next.js Services]
-        MatchAPI[cs/matches endpoint]
+    subgraph HonoSvc [Hono API Services]
+        MatchAPI[GET /api/cs/matches]
     end
 
     subgraph ExternalSvc [External Services]
@@ -1092,27 +1132,30 @@ classDiagram
 
 ```mermaid
 classDiagram
-    class NextJSApp {
+    class ViteApp {
         +ConvexClientProvider
         +ClerkProvider
-        +pages/
-        +api/
+        +TanStack Router
+        +src/routes/
     }
 
-    class Pages {
-        +page.tsx (Dashboard)
-        +admin/page.tsx
-        +settings/page.tsx
-        +location/page.tsx
-        +lucky-numbers/page.tsx
-        +match/page.tsx
+    class Routes {
+        +index.tsx (Dashboard)
+        +admin.tsx
+        +settings.tsx
+        +location.tsx
+        +lucky-numbers.tsx
+        +match.tsx
+        +editor.tsx
     }
 
     class APIRoutes {
-        +api/location/route.ts
-        +api/spotify-callback/route.ts
-        +api/cs/download/route.ts
-        +api/cs/matches/route.ts
+        +GET /api/spotify-callback
+        +GET /api/cs/download
+        +GET /api/cs/matches
+        +POST /api/cs/archive
+        +POST /api/location
+        +GET /api/cs
     }
 
     class ConvexFunctions {
@@ -1155,10 +1198,18 @@ classDiagram
         +getOwnerUserId()
     }
 
-    NextJSApp --> Pages
-    NextJSApp --> APIRoutes
-    Pages --> ConvexFunctions : useQuery, useMutation, useAction
-    APIRoutes --> ConvexFunctions : server-side calls
+    class HonoServer {
+        +serves Vite static build
+        +proxies API calls
+        +Steam GC connections
+        +OAuth callbacks
+    }
+
+    ViteApp --> Routes
+    ViteApp --> HonoServer : serves static build
+    Routes --> ConvexFunctions : useQuery, useMutation, useAction
+    HonoServer --> ConvexFunctions : ConvexHttpClient calls
+    HonoServer --> APIRoutes : handles HTTP routes
     ConvexFunctions --> Queries
     ConvexFunctions --> Mutations
     ConvexFunctions --> Actions
@@ -1214,7 +1265,7 @@ classDiagram
 
     note for SpotifyIntegration "Handled in Convex actions"
     note for SteamWebAPIIntegration "Handled in Convex actions"
-    note for SteamGCIntegration "Handled in Next.js API routes"
+    note for SteamGCIntegration "Handled in Hono API routes"
     note for OpenStreetMapIntegration "Called directly from browser"
     note for ClerkIntegration "Client-side + JWT to Convex"
 ```
@@ -1313,8 +1364,8 @@ flowchart TD
 | --- | --- | --- |
 | **Client** | Network failure | Show toast notification, retry button |
 | **Client** | Validation error | Inline form errors |
-| **Next.js API** | Missing env vars | Return 500 with generic message (no details) |
-| **Next.js API** | Steam GC timeout | Return 504, client shows retry option |
+| **API Server (Hono)** | Missing env vars | Return 500 with generic message (no details) |
+| **API Server (Hono)** | Steam GC timeout | Return 504, client shows retry option |
 | **Convex Query** | Unauthorized | Return null or empty array (UI shows appropriate state) |
 | **Convex Action** | External API error | Return `{ success: false, error: "code" }` |
 | **Convex Cron** | API failure | Log error, retry on next interval |
@@ -1354,12 +1405,12 @@ flowchart TD
 │  • React components                                               │
 │  • User inputs (share codes, auth tokens - user's own data)       │
 │  • No secrets, no API keys                                        │
-│  • All sensitive operations via Convex or Next.js API             │
+│  • All sensitive operations via Convex or Hono API               │
 └──────────────────────────────────────────────────────────────────┘
                                  │
                                  ▼
 ┌──────────────────────────────────────────────────────────────────┐
-│                  TRUSTED (Server - Next.js API)                   │
+│                  TRUSTED (Server - Hono API)                      │
 │  • STEAM_USERNAME, STEAM_PASSWORD                                │
 │  • Steam GC connections (binary protocol)                         │
 │  • Location API endpoint (validates password)                     │
@@ -1382,10 +1433,10 @@ flowchart TD
 
 | Concern | Where Handled | Rationale |
 | --- | --- | --- |
-| **Steam GC Connection** | Next.js API Route | Requires persistent socket, `steam-user` npm package, Node.js runtime |
-| **Steam Login Credentials** | Next.js env vars | Only the API route needs them; never exposed to browser |
+| **Steam GC Connection** | Hono API (Node.js) | Requires persistent socket, `steam-user` npm package, Node.js runtime |
+| **Steam Login Credentials** | Hono env vars | Only the API route needs them; never exposed to browser |
 | **Spotify Token Exchange** | Convex Action | Token exchange + DB save happen atomically; token never leaves server |
-| **OAuth Callbacks** | Next.js API Route | OAuth providers redirect to URL endpoints, not WebSocket |
+| **OAuth Callbacks** | Hono API Route | OAuth providers redirect to URL endpoints, not WebSocket |
 | **Database Operations** | Convex | Transactional consistency, real-time subscriptions, automatic scaling |
 | **User Settings** | Convex | Protected by authentication, stored per-user |
 | **Steam Web API** | Convex Action | API key stays server-side; simpler HTTP calls |
@@ -1406,22 +1457,27 @@ flowchart TD
 
 ## Environment Variables
 
-### Next.js (.env.local)
+### .env.local (shared between client and server)
 
 ```bash
 # Convex connection
-NEXT_PUBLIC_CONVEX_URL=https://your-deployment.convex.cloud
+VITE_CONVEX_URL=https://your-deployment.convex.cloud
 
 # Clerk authentication
-NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_your_clerk_publishable_key
+VITE_CLERK_PUBLISHABLE_KEY=pk_test_your_clerk_publishable_key
 
 # Spotify OAuth (public = used in client redirect URL)
-NEXT_PUBLIC_SPOTIFY_CLIENT_ID=your_spotify_client_id
+VITE_SPOTIFY_CLIENT_ID=your_spotify_client_id
 
-# Steam GC credentials (server-side only, no NEXT_PUBLIC_ prefix)
+# Steam GC credentials (server-side only, read from same file)
 STEAM_USERNAME=your_steam_username
 STEAM_PASSWORD=your_steam_password
+
+# Internal secret for CS2 demo archive endpoint
+CS2_ARCHIVE_INTERNAL_SECRET=your-internal-secret
 ```
+
+Variables prefixed with `VITE_` are bundled into the client at build time. The rest are server-only.
 
 ### Convex Environment Variables
 
@@ -1456,10 +1512,10 @@ CS2_DEMOS_S3_PATH=s3://your-bucket-name/optional-prefix
 1. **Security**: Sensitive credentials never exposed to client; all secrets in server-side environment variables
 2. **Real-time Updates**: Convex provides instant UI updates via WebSocket subscriptions
 3. **Performance**: Cron jobs pre-cache external API data, reducing latency and API rate limit usage
-4. **Flexibility**: Next.js API routes handle operations requiring Node.js runtime features (Steam GC)
+4. **Flexibility**: Hono API server handles operations requiring Node.js runtime features (Steam GC)
 5. **Maintainability**: Clear separation between client, API routes, and Convex functions
 6. **Privacy**: Location data protected by role-based permissions
 
-The split between Convex and Next.js API routes is intentional:
+The split between Convex and the Hono API server is intentional:
 - **Convex**: Best for database operations, real-time queries, scheduled jobs, simple HTTP API calls
-- **Next.js**: Required for OAuth callbacks (URL-based), Steam GC (persistent socket + Node.js libraries)
+- **Hono (Node.js)**: Required for OAuth callbacks (URL-based), Steam GC (persistent socket + Node.js libraries)
