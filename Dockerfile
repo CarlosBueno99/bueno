@@ -16,9 +16,7 @@ COPY --from=deps /app/backend/node_modules ./backend/node_modules
 COPY backend/ ./backend/
 COPY convex/_generated ./convex/_generated
 RUN cd backend && pnpm exec esbuild server/index.ts \
-  --bundle --platform=node --outfile=dist/server.js \
-  --external:hono --external:@clerk/hono --external:convex \
-  --external:@aws-sdk/* --external:globaloffensive --external:steam-user
+  --bundle --platform=node --outfile=dist/server.js --packages=external
 
 FROM node:22-slim AS runner
 WORKDIR /app
