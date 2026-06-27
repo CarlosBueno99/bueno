@@ -49,3 +49,7 @@ dist/
 
 # generated
 src/routeTree.gen.ts
+
+# bundle analysis
+stats.html
+bundle-data.json

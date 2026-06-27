@@ -3,7 +3,7 @@ import { useQuery, useMutation, useConvexAuth, useAction } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { Navbar } from "../../components/Navbar";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../../components/ui/card";
-import { formatDistanceToNow } from "date-fns";
+import { formatDistanceToNow } from "date-fns/formatDistanceToNow";
 import { Alert, AlertDescription, AlertTitle } from "../../components/ui/alert";
 import { useEffect, useState } from "react";
 import { Id } from "../../convex/_generated/dataModel";
