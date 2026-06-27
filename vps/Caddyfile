@@ -1,13 +1,7 @@
-# Main app — reverse-proxy to backend API.
-# If hosting the frontend on this VPS, serve static files instead:
-#   cool.carlosbueno.xyz {
-#       root * /var/www/cool.carlosbueno.xyz
-#       file_server
-#       @api path /api/*
-#       reverse_proxy @api api:3000
-#   }
 cool.carlosbueno.xyz {
-    reverse_proxy api:3000
+    @api path /api/*
+    reverse_proxy @api api:3000
+    reverse_proxy frontend:80
 }
 
 backend.carlosbueno.xyz {

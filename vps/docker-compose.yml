@@ -42,6 +42,16 @@ services:
       convex-backend:
         condition: service_healthy
 
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_PORT:-8080}:80"
+    depends_on:
+      - api
+
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped
@@ -52,10 +62,9 @@ services:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data
       - caddy-config:/config
-      # Uncomment to serve frontend static files from the host:
-      # - /var/www:/var/www
     depends_on:
       - api
+      - frontend
 
 volumes:
   convex-data:
