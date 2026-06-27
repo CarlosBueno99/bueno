@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "concurrently \"vite\" \"tsx watch server/index.ts\"",
+    "dev": "concurrently \"vite\" \"tsx watch --env-file=.env.local server/index.ts\"",
     "build": "vite build && esbuild server/index.ts --bundle --platform=node --outfile=dist/server.js --packages=external",
     "start": "NODE_ENV=production node dist/server.js"
   },
