@@ -4,8 +4,10 @@
   "private": true,
   "scripts": {
     "dev": "concurrently \"vite\" \"tsx watch --env-file=.env.local server/index.ts\"",
-    "build": "vite build && esbuild server/index.ts --bundle --platform=node --outfile=dist/server.js --packages=external",
-    "start": "NODE_ENV=production node dist/server.js"
+    "build:server": "esbuild server/index.ts --bundle --platform=node --outfile=dist/server.js --packages=external",
+    "start:server": "NODE_ENV=production node dist/server.js",
+    "build": "vite build && npm run build:server",
+    "start": "npm run start:server"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.975.0",

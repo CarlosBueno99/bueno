@@ -10,7 +10,7 @@ Personal dashboard that aggregates data from Spotify, Steam/CS2, GPS location tr
 # 1. Clone and install
 git clone <repo-url>
 cd bueno
-pnpm install
+npm install
 
 # 2. Set up environment
 cp .env.local.example .env.local   # or create from scratch (see Environment Variables below)
@@ -19,42 +19,42 @@ cp .env.local.example .env.local   # or create from scratch (see Environment Var
 npx convex dev
 
 # 4. Run the app (client + server concurrently)
-pnpm dev
+npm run dev
 ```
 
 The Vite dev server runs on `http://localhost:5173` with API requests proxied to the Hono server on `http://localhost:3000`.
 
-### Production — Decoupled Deployment
+### Production — Single Service (API + Frontend)
 
-The frontend and backend are independent services. Deploy them separately:
+The server serves both the API and the built frontend static files.
 
-**Option A: Frontend to static host, Backend to Docker/VPS**
+| | |
+|---|---|
+| Root | `/` |
+| Build | `npm run build` |
+| Start | `npm run start` |
 
-```bash
-# Build frontend
-pnpm build                    # outputs to dist/static/
-# Set VITE_API_URL at build time:
-VITE_API_URL=https://api.example.com pnpm build
+### Production — Separate Services (Frontend + Backend)
 
-# Deploy dist/static/ to any static host (Vercel, Netlify, Cloudflare Pages, S3)
+Deploy the backend to any Node.js host and the frontend to any static host.
 
-# Build and run backend (API-only)
-docker build -t bueno-api .
-docker run -p 3000:3000 --env-file .env.local \
-  -e FRONTEND_URL=https://cool.example.com \
-  bueno-api
-```
+**Backend (API only)**
 
-**Option B: Full stack on a VPS**
+| | |
+|---|---|
+| Root | `/` |
+| Build | `npm run build:server` |
+| Start | `npm run start:server` |
+| Env | `VITE_API_URL` set to frontend origin for CORS |
 
-```bash
-cd vps
-cp ../.env.local.example ../.env.local   # fill in secrets
-cp .env.convex.example .env.convex       # fill in Convex backend config
-docker compose up -d                      # starts API + Convex + Caddy
-```
+**Frontend (static files)**
 
-See `vps/docker-compose.yml` and `vps/Caddyfile` for the full setup.
+| | |
+|---|---|
+| Root | `/` |
+| Build | `npm run build` |
+| Start | `npx serve dist/static -l $PORT -s` |
+| Env | `VITE_API_URL` set to backend origin |
 
 ---
 
@@ -110,7 +110,7 @@ This split exists because some operations (like Steam Game Coordinator connectio
 | **Backend (Database)** | Convex | Real-time database, queries, mutations, actions, cron jobs |
 | **Backend (API Server)** | Hono (Node.js) | Steam GC connections, OAuth callbacks |
 | **Maps** | Leaflet + OpenStreetMap | Client-side map rendering and geocoding |
-| **Package Manager** | pnpm | Dependency management |
+| **Package Manager** | npm | Dependency management |
 | **External APIs** | Spotify, Steam Web API, Steam GC | Third-party data sources |
 
 ---
