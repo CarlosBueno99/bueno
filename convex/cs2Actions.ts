@@ -1,6 +1,7 @@
-import { action, mutation, query, internalQuery, internalMutation } from "./_generated/server";
+import { action, mutation, query, internalQuery, internalMutation, internalAction } from "./_generated/server";
 import { v } from "convex/values";
 import { internal, api } from "./_generated/api";
+import { Id } from "./_generated/dataModel";
 
 // Resolve a vanity URL to Steam ID64 using Steam API
 async function resolveVanityUrl(vanityUrl: string, apiKey: string): Promise<string | null> {
@@ -155,6 +156,222 @@ export const getLatestShareCodeForSteamId = internalQuery({
     });
 
     return sorted[0].shareCode;
+  },
+});
+
+type Cs2FetchTarget = {
+  userId: Id<"users">;
+  targetSteamId: string;
+  authCode: string;
+  startingKnownCode: string | null;
+};
+
+/**
+ * Internal query for scheduled CS2 match fetches.
+ * A user is eligible when they have a Steam ID or vanity name, plus a CS2
+ * share-code auth token. The latest saved match is preferred as the cursor.
+ */
+export const getConfiguredCs2FetchTargets = internalQuery({
+  args: {},
+  returns: v.array(
+    v.object({
+      userId: v.id("users"),
+      targetSteamId: v.string(),
+      authCode: v.string(),
+      startingKnownCode: v.union(v.string(), v.null()),
+    })
+  ),
+  handler: async (ctx): Promise<Cs2FetchTarget[]> => {
+    const settings = await ctx.db.query("websiteSettings").collect();
+    const targets: Cs2FetchTarget[] = [];
+
+    for (const setting of settings) {
+      const targetSteamId = setting.steamId || setting.cs2SteamUsername;
+      const authCode = setting.cs2ShareCodeAuthToken;
+      if (!targetSteamId || !authCode) continue;
+
+      const matches = await ctx.db
+        .query("cs2Matches")
+        .withIndex("by_steamId", (q) => q.eq("steamId", targetSteamId))
+        .collect();
+
+      const latestMatch = matches.sort((a, b) => {
+        const timeA = a.matchTime ? new Date(a.matchTime).getTime() : a.fetchedAt;
+        const timeB = b.matchTime ? new Date(b.matchTime).getTime() : b.fetchedAt;
+        return timeB - timeA;
+      })[0];
+
+      targets.push({
+        userId: setting.userId,
+        targetSteamId,
+        authCode,
+        startingKnownCode: latestMatch?.shareCode ?? setting.cs2LastShareCode ?? null,
+      });
+    }
+
+    return targets;
+  },
+});
+
+/**
+ * Internal mutation used by the scheduled fetcher to persist newly discovered
+ * share codes without requiring an authenticated browser session.
+ */
+export const saveFetchedShareCodes = internalMutation({
+  args: {
+    userId: v.id("users"),
+    steamId: v.string(),
+    shareCodes: v.array(v.string()),
+  },
+  returns: v.object({
+    saved: v.number(),
+    updated: v.number(),
+  }),
+  handler: async (ctx, args) => {
+    let saved = 0;
+    let updated = 0;
+    const now = Date.now();
+
+    for (const shareCode of args.shareCodes) {
+      const existing = await ctx.db
+        .query("cs2Matches")
+        .withIndex("by_shareCode", (q) => q.eq("shareCode", shareCode))
+        .unique();
+
+      if (existing) {
+        await ctx.db.patch(existing._id, { fetchedAt: now });
+        updated++;
+      } else {
+        await ctx.db.insert("cs2Matches", {
+          userId: args.userId,
+          steamId: args.steamId,
+          shareCode,
+          fetchedAt: now,
+        });
+        saved++;
+      }
+    }
+
+    const settings = await ctx.db
+      .query("websiteSettings")
+      .withIndex("by_userId", (q) => q.eq("userId", args.userId))
+      .unique();
+
+    const latestShareCode = args.shareCodes.at(-1);
+    if (settings && latestShareCode) {
+      await ctx.db.patch(settings._id, {
+        cs2LastShareCode: latestShareCode,
+      });
+    }
+
+    return { saved, updated };
+  },
+});
+
+type ScheduledFetchResult = {
+  usersChecked: number;
+  usersConfigured: number;
+  shareCodesFound: number;
+  saved: number;
+  updated: number;
+  errors: string[];
+};
+
+/**
+ * Scheduled fetch for new CS2 matches.
+ * This stores new share codes. Demo URL and detailed metadata enrichment still
+ * happens through the Hono Steam GC routes because that integration requires
+ * the Node-specific Steam libraries used by the API server.
+ */
+export const fetchNewCounterStrikeGames = internalAction({
+  args: {
+    maxMatches: v.optional(v.number()),
+  },
+  returns: v.object({
+    usersChecked: v.number(),
+    usersConfigured: v.number(),
+    shareCodesFound: v.number(),
+    saved: v.number(),
+    updated: v.number(),
+    errors: v.array(v.string()),
+  }),
+  handler: async (ctx, args): Promise<ScheduledFetchResult> => {
+    const steamApiKey = process.env.STEAM_API_KEY;
+    if (!steamApiKey) {
+      return {
+        usersChecked: 0,
+        usersConfigured: 0,
+        shareCodesFound: 0,
+        saved: 0,
+        updated: 0,
+        errors: ["Steam API key not configured. Set STEAM_API_KEY environment variable."],
+      };
+    }
+
+    const targets: Cs2FetchTarget[] = await ctx.runQuery(
+      internal.cs2Actions.getConfiguredCs2FetchTargets,
+      {}
+    );
+
+    const result: ScheduledFetchResult = {
+      usersChecked: targets.length,
+      usersConfigured: targets.length,
+      shareCodesFound: 0,
+      saved: 0,
+      updated: 0,
+      errors: [],
+    };
+
+    for (const target of targets) {
+      if (!target.startingKnownCode) {
+        result.errors.push(
+          `Skipping ${target.targetSteamId}: no saved match or CS2 last share code configured.`
+        );
+        continue;
+      }
+
+      let steamId = target.targetSteamId;
+      if (!isSteamId64(steamId)) {
+        const resolvedId = await resolveVanityUrl(steamId, steamApiKey);
+        if (!resolvedId) {
+          result.errors.push(`Skipping ${target.targetSteamId}: could not resolve vanity URL.`);
+          continue;
+        }
+        steamId = resolvedId;
+      }
+
+      const shareCodesResult = await getMatchSharingCodes(
+        steamId,
+        target.authCode,
+        steamApiKey,
+        target.startingKnownCode,
+        args.maxMatches ?? 30
+      );
+
+      if (shareCodesResult.error) {
+        result.errors.push(`${steamId}: ${shareCodesResult.error}`);
+        continue;
+      }
+
+      if (shareCodesResult.shareCodes.length === 0) {
+        continue;
+      }
+
+      const saveResult: { saved: number; updated: number } = await ctx.runMutation(
+        internal.cs2Actions.saveFetchedShareCodes,
+        {
+          userId: target.userId,
+          steamId,
+          shareCodes: shareCodesResult.shareCodes,
+        }
+      );
+
+      result.shareCodesFound += shareCodesResult.shareCodes.length;
+      result.saved += saveResult.saved;
+      result.updated += saveResult.updated;
+    }
+
+    return result;
   },
 });
 

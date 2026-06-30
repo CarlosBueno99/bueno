@@ -13,10 +13,6 @@
 # testing
 /coverage
 
-# next.js
-/.next/
-/out/
-
 # production
 /build
 
@@ -30,17 +26,30 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files (can opt-in for committing if needed)
+# env files
 .env*
+!.env.local.example
+!.env.convex.example
+
+# lockfiles
+pnpm-lock.yaml
+bun.lock
 
 # vercel
 .vercel
 
 # typescript
 *.tsbuildinfo
-next-env.d.ts
 
 
 .cursor/
 
 node_modules/
+dist/
+
+# generated
+src/routeTree.gen.ts
+
+# bundle analysis
+stats.html
+bundle-data.json
