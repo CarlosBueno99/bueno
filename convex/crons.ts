@@ -1,7 +1,5 @@
 import { cronJobs } from "convex/server";
-import { internal, api } from "./_generated/api";
-import { Id } from "./_generated/dataModel";
-import { internalAction } from "./_generated/server";
+import { internal } from "./_generated/api";
 
 const crons = cronJobs();
 
@@ -18,6 +16,14 @@ crons.interval(
   "Refresh Steam data for main user every 1 hour",
   { hours: 1 },
   internal.steamApi.refreshMainUserSteamData
+);
+
+// Fetch new CS2 match share codes every 30 minutes
+crons.interval(
+  "Fetch new Counter-Strike games every 30 minutes",
+  { minutes: 30 },
+  internal.cs2Actions.fetchNewCounterStrikeGames,
+  {}
 );
 
 // Archive CS2 demos to S3 every 30 minutes
