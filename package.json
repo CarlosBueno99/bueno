@@ -35,6 +35,7 @@
     "lucide-react": "^0.503.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "react-hook-form": "^7.80.0",
     "react-leaflet": "^5.0.0",
     "steam-user": "^5.2.1",
     "tailwind-merge": "^3.2.0",
@@ -49,10 +50,10 @@
     "@types/react-dom": "^19",
     "concurrently": "^9.2.1",
     "esbuild": "^0.28",
+    "shadcn-ui": "^0.9.5",
     "tailwindcss": "^4",
     "tsx": "^4.21.0",
     "tw-animate-css": "^1.2.8",
-    "typescript": "^5",
-    "shadcn-ui": "^0.9.5"
+    "typescript": "^5"
   }
 }
