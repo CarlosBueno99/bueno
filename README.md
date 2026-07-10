@@ -135,8 +135,8 @@ pnpm dev
 
 Local URLs:
 
-- Vite client: `http://localhost:5173`
-- Hono API server: `http://localhost:3000`
+- Vite client: `http://127.0.0.1:5173`
+- Hono API server: `http://127.0.0.1:3000`
 - Vite proxies `/api/*` to the Hono server during development.
 
 ## Scripts
@@ -144,7 +144,8 @@ Local URLs:
 | Script | Command | Description |
 | --- | --- | --- |
 | `pnpm dev` | `concurrently "vite" "tsx watch --env-file=.env.local server/index.ts"` | Runs the Vite app and local Hono API server |
-| `pnpm build` | `vite build && pnpm run build:server` | Builds the static client and bundles the Node server |
+| `pnpm build` | `convex deploy --cmd "pnpm run build:app" --cmd-url-env-var-name VITE_CONVEX_URL` | Builds the app, then deploys Convex only if the build succeeds |
+| `pnpm build:app` | `vite build && pnpm run build:server` | Builds the static client and Node server without deploying Convex |
 | `pnpm build:server` | `esbuild server/index.ts --bundle --platform=node --outfile=dist/server.js --packages=external` | Bundles the Hono Node server |
 | `pnpm start` | `pnpm run start:server` | Starts the production Node server |
 | `pnpm start:server` | `NODE_ENV=production node dist/server.js` | Serves API routes and, when present, `dist/static` |
@@ -213,6 +214,11 @@ pnpm start
 ```
 
 This serves `/api/*` from Hono and serves the built Vite client from `dist/static`.
+
+`pnpm build` requires a Convex deployment selection. In CI or Railway, set the
+server-only `CONVEX_DEPLOY_KEY` secret for the target deployment. Use
+`pnpm build:app` when you only want build artifacts and do not want to deploy
+Convex.
 
 ### Static Frontend plus API
 

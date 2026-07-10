@@ -10,7 +10,8 @@ export function registerSpotifyRoutes(app: Hono) {
     const frontendUrl = process.env.FRONTEND_URL
 
     // Fallback to deriving from request headers for backward compat
-    const origin = c.req.header('x-forwarded-proto') || 'https'
+    const requestUrl = new URL(c.req.url)
+    const origin = c.req.header('x-forwarded-proto') || requestUrl.protocol.slice(0, -1)
     const host = c.req.header('x-forwarded-host') || c.req.header('host') || 'localhost:3000'
     const baseUrl = frontendUrl ?? `${origin}://${host}`
 

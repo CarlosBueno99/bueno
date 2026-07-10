@@ -5,9 +5,10 @@
   "packageManager": "pnpm@11.8.0",
   "scripts": {
     "dev": "concurrently \"vite\" \"tsx watch --env-file=.env.local server/index.ts\"",
+    "build:app": "vite build && pnpm run build:server",
     "build:server": "esbuild server/index.ts --bundle --platform=node --outfile=dist/server.js --packages=external",
     "start:server": "NODE_ENV=production node dist/server.js",
-    "build": "vite build && pnpm run build:server",
+    "build": "convex deploy --cmd \"pnpm run build:app\" --cmd-url-env-var-name VITE_CONVEX_URL",
     "start": "pnpm run start:server"
   },
   "dependencies": {
