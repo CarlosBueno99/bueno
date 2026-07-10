@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import { RouterProvider, createRouter } from '@tanstack/react-router'
 import { ClerkProvider } from '@clerk/react'
 import ConvexClientProvider from './providers/ConvexClientProvider'
+import PostHogProvider from './providers/PostHogProvider'
 import { routeTree } from './routeTree.gen'
 import './globals.css'
 
@@ -22,9 +23,11 @@ if (!publishableKey) {
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <ClerkProvider publishableKey={publishableKey} afterSignOutUrl="/">
-      <ConvexClientProvider>
-        <RouterProvider router={router} />
-      </ConvexClientProvider>
+      <PostHogProvider router={router}>
+        <ConvexClientProvider>
+          <RouterProvider router={router} />
+        </ConvexClientProvider>
+      </PostHogProvider>
     </ClerkProvider>
   </StrictMode>,
 )

@@ -2,12 +2,13 @@
   "name": "bueno",
   "version": "0.1.0",
   "private": true,
+  "packageManager": "pnpm@11.8.0",
   "scripts": {
     "dev": "concurrently \"vite\" \"tsx watch --env-file=.env.local server/index.ts\"",
     "build:server": "esbuild server/index.ts --bundle --platform=node --outfile=dist/server.js --packages=external",
     "start:server": "NODE_ENV=production node dist/server.js",
-    "build": "vite build && npm run build:server",
-    "start": "npm run start:server"
+    "build": "vite build && pnpm run build:server",
+    "start": "pnpm run start:server"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.975.0",
@@ -33,6 +34,7 @@
     "hono": "^4.12.14",
     "leaflet": "^1.9.4",
     "lucide-react": "^0.503.0",
+    "posthog-js": "^1.399.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-hook-form": "^7.80.0",

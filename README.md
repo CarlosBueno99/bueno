@@ -112,7 +112,7 @@ Current cron schedule:
 Install dependencies:
 
 ```bash
-npm install
+pnpm install
 ```
 
 Create local environment files:
@@ -124,13 +124,13 @@ cp .env.local.example .env.local
 Start Convex in one terminal:
 
 ```bash
-npx convex dev
+pnpm exec convex dev
 ```
 
 Start the Vite client and Hono server in another terminal:
 
 ```bash
-npm run dev
+pnpm dev
 ```
 
 Local URLs:
@@ -143,11 +143,11 @@ Local URLs:
 
 | Script | Command | Description |
 | --- | --- | --- |
-| `npm run dev` | `concurrently "vite" "tsx watch --env-file=.env.local server/index.ts"` | Runs the Vite app and local Hono API server |
-| `npm run build` | `vite build && npm run build:server` | Builds the static client and bundles the Node server |
-| `npm run build:server` | `esbuild server/index.ts --bundle --platform=node --outfile=dist/server.js --packages=external` | Bundles the Hono Node server |
-| `npm run start` | `npm run start:server` | Starts the production Node server |
-| `npm run start:server` | `NODE_ENV=production node dist/server.js` | Serves API routes and, when present, `dist/static` |
+| `pnpm dev` | `concurrently "vite" "tsx watch --env-file=.env.local server/index.ts"` | Runs the Vite app and local Hono API server |
+| `pnpm build` | `vite build && pnpm run build:server` | Builds the static client and bundles the Node server |
+| `pnpm build:server` | `esbuild server/index.ts --bundle --platform=node --outfile=dist/server.js --packages=external` | Bundles the Hono Node server |
+| `pnpm start` | `pnpm run start:server` | Starts the production Node server |
+| `pnpm start:server` | `NODE_ENV=production node dist/server.js` | Serves API routes and, when present, `dist/static` |
 
 ## Environment Variables
 
@@ -159,6 +159,8 @@ VITE_CONVEX_URL=https://your-deployment.convex.cloud
 VITE_CLERK_PUBLISHABLE_KEY=pk_test_your_clerk_publishable_key
 VITE_SPOTIFY_CLIENT_ID=your_spotify_client_id
 VITE_API_URL=
+VITE_POSTHOG_KEY=
+VITE_POSTHOG_HOST=https://us.i.posthog.com
 
 # Server-side for Hono.
 FRONTEND_URL=http://localhost:5173
@@ -174,7 +176,7 @@ AWS_REGION=us-east-1
 CS2_DEMOS_S3_PATH=s3://your-bucket-name/optional-prefix
 ```
 
-Set Convex environment variables with `npx convex env set` or in the Convex dashboard:
+Set Convex environment variables with `pnpm exec convex env set` or in the Convex dashboard:
 
 ```bash
 CLERK_JWT_ISSUER_DOMAIN=https://your-clerk-domain.clerk.accounts.dev
@@ -205,8 +207,8 @@ There are two supported shapes:
 Run the built Hono server as the single web process:
 
 ```bash
-npm run build
-npm run start
+pnpm build
+pnpm start
 ```
 
 This serves `/api/*` from Hono and serves the built Vite client from `dist/static`.
@@ -224,4 +226,3 @@ Convex is deployed independently with the Convex CLI or dashboard.
 - Admin-only and owner-only UI paths check `api.auth.getUserPermission`.
 - Steam credentials, Spotify secrets, AWS credentials, location API keys, and refresh tokens stay server-side.
 - CS2 demo URL retrieval lives in Hono because it depends on Steam's persistent Game Coordinator connection and Node libraries.
-
