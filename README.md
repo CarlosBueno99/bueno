@@ -160,7 +160,8 @@ VITE_CLERK_PUBLISHABLE_KEY=pk_test_your_clerk_publishable_key
 VITE_SPOTIFY_CLIENT_ID=your_spotify_client_id
 VITE_API_URL=
 VITE_POSTHOG_KEY=
-VITE_POSTHOG_HOST=https://us.i.posthog.com
+VITE_POSTHOG_HOST=https://metrics-ingest.example.com
+VITE_POSTHOG_UI_HOST=https://us.posthog.com
 
 # Server-side for Hono.
 FRONTEND_URL=http://localhost:5173

@@ -8,6 +8,7 @@ type Consent = 'accepted' | 'declined' | null
 const consentStorageKey = 'bueno_analytics_consent'
 const posthogKey = import.meta.env.VITE_POSTHOG_KEY?.trim()
 const posthogHost = import.meta.env.VITE_POSTHOG_HOST?.trim()
+const posthogUiHost = import.meta.env.VITE_POSTHOG_UI_HOST?.trim()
 const analyticsConfigured = Boolean(posthogKey && posthogHost)
 const doNotTrackEnabled =
   navigator.doNotTrack === '1' || navigator.doNotTrack === 'yes'
@@ -44,6 +45,7 @@ function initializePostHog() {
       maskAllInputs: true,
       maskTextSelector: '*',
     },
+    ...(posthogUiHost ? { ui_host: posthogUiHost } : {}),
   })
   posthogInitialized = true
 }
