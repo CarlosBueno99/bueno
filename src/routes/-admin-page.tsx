@@ -20,7 +20,7 @@ function AdminPage() {
   const triggerSpotifyRefresh = useAction(api.spotify.triggerSpotifyRefresh);
   const fetchMatchShareCodes = useAction(api.cs2Actions.fetchMatchShareCodes);
   const saveMatchResults = useMutation(api.cs2Actions.saveMatchResults);
-  const triggerDemoArchive = useAction(api.cs2Actions.triggerDemoArchive);
+  const triggerCs2Automation = useAction(api.cs2Actions.triggerCs2Automation);
 
   const [email, setEmail] = useState("");
   const [newPermission, setNewPermission] = useState("viewer");
@@ -186,8 +186,15 @@ function AdminPage() {
     setArchiveLoading(true);
     setArchiveResult(null);
     try {
-      const result = await triggerDemoArchive({});
-      setArchiveResult(result);
+      const result = await triggerCs2Automation({});
+      setArchiveResult({
+        success: result.success,
+        processed: result.demoUrlsAvailable + result.demoUrlsMissing,
+        successful: result.demosArchived,
+        failed: result.demoUrlsMissing + result.errors.length,
+        errors: result.errors,
+        error: result.error,
+      });
     } catch (error) {
       setArchiveResult({ success: false, processed: 0, successful: 0, failed: 0, errors: [], error: error instanceof Error ? error.message : "Unknown error occurred" });
     } finally {
@@ -445,7 +452,7 @@ function AdminPage() {
                                     )}
                                   </div>
                                   <div className="flex items-center gap-1">
-                                    {match.s3ObjectKey ? <Badge className="bg-purple-600">Archived</Badge> : match.demoUrl ? (isExpired ? <Badge variant="outline" className="bg-yellow-100 text-yellow-800 border-yellow-300">Expired</Badge> : <Badge variant="outline" className="bg-blue-100 text-blue-800 border-blue-300">Pending</Badge>) : <Badge variant="secondary">No Demo</Badge>}
+                                    {match.s3ObjectKey ? <Badge className="bg-purple-600">Archived</Badge> : match.demoUrl ? (isExpired ? <Badge variant="outline" className="bg-yellow-100 text-yellow-800 border-yellow-300">Expired</Badge> : <Badge variant="outline" className="bg-blue-100 text-blue-800 border-blue-300">Ready to archive</Badge>) : match.demoUrlStatus === "pending" ? <Badge variant="outline">Fetching demo URL</Badge> : <Badge variant="secondary">Demo URL missing</Badge>}
                                   </div>
                                 </div>
                                 {match.playerStats && (
@@ -462,6 +469,8 @@ function AdminPage() {
                                   <a href={match.demoUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-800 underline text-sm break-all mt-1">Download Demo</a>
                                 )}
                                 {match.s3ObjectKey && <span className="text-xs text-purple-600 break-all">{match.s3ObjectKey}</span>}
+                                {match.demoUrlError && !match.demoUrl && <span className="text-xs text-red-600">{match.demoUrlError}</span>}
+                                {match.archiveError && !match.s3ObjectKey && <span className="text-xs text-red-600">Archive failed: {match.archiveError}</span>}
                               </div>
                             </div>
                           );
@@ -481,9 +490,9 @@ function AdminPage() {
                 <Button onClick={handleFetchRecentMatches} disabled={matchesLoading || !authCode || (!targetSteamId && !websiteSettings?.steamId)}>
                   {matchesLoading ? "Fetching..." : savedMatches && savedMatches.length > 0 ? "Fetch New Matches" : "Fetch Matches"}
                 </Button>
-                {savedMatches && savedMatches.some((m: typeof savedMatches[0]) => m.demoUrl && !m.s3ObjectKey) && (
+                {savedMatches && savedMatches.some((m: typeof savedMatches[0]) => !m.s3ObjectKey) && (
                   <Button variant="outline" onClick={handleArchiveDemos} disabled={archiveLoading}>
-                    {archiveLoading ? "Archiving..." : "Archive Demos to S3"}
+                    {archiveLoading ? "Processing..." : "Run CS2 Automation"}
                   </Button>
                 )}
               </div>

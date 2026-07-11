@@ -20,7 +20,7 @@ Runtime flow:
 2. Clerk authenticates the user and provides tokens to Convex through `ConvexProviderWithClerk`.
 3. UI routes call Convex queries, mutations, and actions directly for app data.
 4. UI routes call `/api/*` for Node-only HTTP work.
-5. Convex cron jobs refresh cached Spotify and Steam data and archive pending CS2 demos.
+5. Convex cron jobs refresh cached data and ask Hono to enrich and archive new CS2 matches.
 
 ## Tech Stack
 
@@ -92,11 +92,10 @@ Important Convex modules:
 - `convex/spotify.ts` and `convex/spotifyActions.ts`: Spotify data refresh, OAuth token exchange, currently playing lookup.
 - `convex/spotifyQueries.ts`: Spotify read helpers.
 - `convex/steamApi.ts` and `convex/steamQueries.ts`: Steam profile and CS2 stats refresh/read paths.
-- `convex/cs2Actions.ts`: CS2 share-code fetching, match persistence, pending archive queries.
-- `convex/cs2DemoArchiver.ts`: scheduled S3 demo archiving.
+- `convex/cs2Actions.ts`: CS2 share-code discovery, Hono orchestration, and match persistence.
 - `convex/locations.ts`: location insert and history queries.
 - `convex/websiteSettings.ts`: integration and CS2 settings.
-- `convex/crons.ts`: scheduled Spotify, Steam, CS2 match fetch, and CS2 demo archive jobs.
+- `convex/crons.ts`: scheduled Spotify, Steam, and complete CS2 processing jobs.
 
 Current cron schedule:
 
@@ -104,8 +103,7 @@ Current cron schedule:
 | --- | --- |
 | Refresh Spotify data for all users | 10 minutes |
 | Refresh Steam data for the main user | 1 hour |
-| Fetch new Counter-Strike games | 30 minutes |
-| Archive CS2 demos to S3 | 30 minutes |
+| Fetch, enrich, and archive new Counter-Strike games | 30 minutes |
 
 ## Local Development
 
@@ -185,11 +183,8 @@ CLERK_JWT_ISSUER_DOMAIN=https://your-clerk-domain.clerk.accounts.dev
 SPOTIFY_CLIENT_ID=your_spotify_client_id
 SPOTIFY_CLIENT_SECRET=your_spotify_client_secret
 STEAM_API_KEY=your_steam_api_key
-AWS_ACCESS_KEY_ID=your_aws_access_key_id
-AWS_SECRET_ACCESS_KEY=your_aws_secret_access_key
-AWS_REGION=us-east-1
-CS2_DEMOS_S3_PATH=s3://your-bucket-name/optional-prefix
-CONCURRENT_ARCHIVES=3
+CS2_API_BASE_URL=https://api.example.com
+CS2_ARCHIVE_INTERNAL_SECRET=use-the-same-value-configured-on-the-hono-service
 ```
 
 Notes:
@@ -198,6 +193,7 @@ Notes:
 - Non-`VITE_*` values are server-only and must not be exposed in client code.
 - `FRONTEND_URL` controls CORS and OAuth redirects for the Hono server.
 - `VITE_API_URL` can stay empty when the API is same-origin. Set it to the backend origin when deploying frontend and API separately.
+- `CS2_API_BASE_URL` must be the publicly reachable Hono origin. The same `CS2_ARCHIVE_INTERNAL_SECRET` value must be configured in both Convex and the Hono service.
 - See `docs/AWS_S3_SETUP.md` for the S3 bucket and IAM setup used by CS2 demo archiving.
 
 ## Deployment

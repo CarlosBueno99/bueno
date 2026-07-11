@@ -2,11 +2,67 @@ import { Hono } from 'hono'
 import { getAuth } from '@clerk/hono'
 import path from 'path'
 import fs from 'fs/promises'
+import { S3Client } from '@aws-sdk/client-s3'
+import { Upload } from '@aws-sdk/lib-storage'
+import { Readable } from 'node:stream'
 
 // @ts-ignore
 const SteamUser = require('steam-user')
 // @ts-ignore
 const GlobalOffensive = require('globaloffensive')
+
+function parseS3Path(s3Path: string) {
+  const match = s3Path.match(/^s3:\/\/([^/]+)(?:\/(.*))?$/)
+  if (!match) throw new Error('Invalid CS2_DEMOS_S3_PATH format')
+  return { bucket: match[1], prefix: match[2] || '' }
+}
+
+function generateDemoFilename(match: any, steamId: string) {
+  const date = match.matchTime
+    ? new Date(match.matchTime).toISOString().split('T')[0]
+    : new Date().toISOString().split('T')[0]
+  let winLoss = 'U'
+  if (match.matchResult != null && match.targetPlayerTeam != null) {
+    winLoss = match.matchResult === match.targetPlayerTeam ? 'W' : 'L'
+  }
+  let score = '0-0'
+  if (match.teamScores?.length === 2 && match.targetPlayerTeam != null) {
+    score = match.targetPlayerTeam === 1
+      ? `${match.teamScores[0]}-${match.teamScores[1]}`
+      : `${match.teamScores[1]}-${match.teamScores[0]}`
+  }
+  const code = match.shareCode.replace('CSGO-', '').split('-')[0] || match.shareCode.slice(0, 5)
+  return `${steamId}-${date}-${winLoss}-${score}-${code}.dem.bz2`
+}
+
+async function archiveDemoToS3(demoUrl: string, filename: string) {
+  const s3Path = process.env.CS2_DEMOS_S3_PATH
+  const accessKeyId = process.env.AWS_ACCESS_KEY_ID
+  const secretAccessKey = process.env.AWS_SECRET_ACCESS_KEY
+  const region = process.env.AWS_REGION || 'us-east-1'
+  if (!s3Path) throw new Error('CS2_DEMOS_S3_PATH is not configured')
+  if (!accessKeyId || !secretAccessKey) throw new Error('AWS credentials are not configured')
+
+  const { bucket, prefix } = parseS3Path(s3Path)
+  const response = await fetch(demoUrl)
+  if (!response.ok) throw new Error(`Demo download failed with HTTP ${response.status}`)
+  if (!response.body) throw new Error('Demo download returned no response body')
+
+  const key = prefix ? `${prefix}/${filename}` : filename
+  const upload = new Upload({
+    client: new S3Client({ region, credentials: { accessKeyId, secretAccessKey } }),
+    params: {
+      Bucket: bucket,
+      Key: key,
+      Body: Readable.fromWeb(response.body as any),
+      ContentType: 'application/x-bzip2',
+    },
+    partSize: 5 * 1024 * 1024,
+    queueSize: 4,
+  })
+  await upload.done()
+  return `s3://${bucket}/${key}`
+}
 
 export function registerCsRoutes(app: Hono) {
   // GET /api/cs — Read parsed demo from local file
@@ -99,8 +155,14 @@ export function registerCsRoutes(app: Hono) {
 
   // GET /api/cs/matches — Batch fetch demo URLs for multiple share codes
   app.get('/api/cs/matches', async (c) => {
-    const auth = getAuth(c)
-    if (!auth?.userId) return c.json({ error: 'Unauthorized.' }, 401)
+    const internalSecret = process.env.CS2_ARCHIVE_INTERNAL_SECRET
+    const isInternalCall = Boolean(
+      internalSecret && c.req.header('x-cs2-internal-secret') === internalSecret
+    )
+    if (!isInternalCall) {
+      const auth = getAuth(c)
+      if (!auth?.userId) return c.json({ error: 'Unauthorized.' }, 401)
+    }
 
     const shareCodesParam = c.req.query('shareCodes')
     const targetSteamId = c.req.query('targetSteamId') ?? null
@@ -181,6 +243,14 @@ export function registerCsRoutes(app: Hono) {
             console.log(`[cs/matches] Requesting game for: ${code}`)
             const result = await getDemoUrlForShareCode(csgo, code, 10000)
             console.log(`[cs/matches] Result for ${code}:`, result.demoUrl ? 'got URL' : (result.error ?? 'no URL'))
+            if (isInternalCall && result.demoUrl && targetSteamId) {
+              try {
+                const filename = generateDemoFilename(result, targetSteamId)
+                result.s3ObjectKey = await archiveDemoToS3(result.demoUrl, filename)
+              } catch (error) {
+                result.archiveError = error instanceof Error ? error.message : String(error)
+              }
+            }
             results.push(result)
             await new Promise(r => setTimeout(r, 500))
           }
@@ -215,7 +285,7 @@ export function registerCsRoutes(app: Hono) {
           resolve(c.json({ error: 'Timeout waiting for demo URLs.' }, 504))
           cleanup()
         }
-      }, 120000)
+      }, isInternalCall ? 10 * 60 * 1000 : 120000)
     })
   })
 
@@ -237,32 +307,9 @@ export function registerCsRoutes(app: Hono) {
     if (!demoUrl) return c.json({ error: 'Missing required field: demoUrl' }, 400)
     if (!filename) return c.json({ error: 'Missing required field: filename' }, 400)
 
-    const s3Path = process.env.CS2_DEMOS_S3_PATH
-    const awsAccessKeyId = process.env.AWS_ACCESS_KEY_ID
-    const awsSecretAccessKey = process.env.AWS_SECRET_ACCESS_KEY
-    const awsRegion = process.env.AWS_REGION || 'us-east-1'
-
-    if (!s3Path) return c.json({ error: 'S3 path not configured.' }, 500)
-    if (!awsAccessKeyId || !awsSecretAccessKey) return c.json({ error: 'AWS credentials not configured.' }, 500)
-
-    const match = s3Path.match(/^s3:\/\/([^\/]+)(?:\/(.*))?$/)
-    if (!match) return c.json({ error: 'Invalid CS2_DEMOS_S3_PATH format.' }, 500)
-
-    const bucket = match[1]
-    const prefix = match[2] || ''
-    const s3Key = prefix ? `${prefix}/${filename}` : filename
-    const s3Uri = `s3://${bucket}/${s3Key}`
-
     try {
-      const { S3Client, PutObjectCommand } = await import('@aws-sdk/client-s3')
-      const downloadResponse = await fetch(demoUrl)
-      if (!downloadResponse.ok) return c.json({ error: `Failed to download demo: HTTP ${downloadResponse.status}` }, 502)
-
-      const demoBuffer = await downloadResponse.arrayBuffer()
-      const s3Client = new S3Client({ region: awsRegion, credentials: { accessKeyId: awsAccessKeyId, secretAccessKey: awsSecretAccessKey } })
-      await s3Client.send(new PutObjectCommand({ Bucket: bucket, Key: s3Key, Body: Buffer.from(demoBuffer), ContentType: 'application/x-bzip2' }))
-
-      return c.json({ success: true, s3Uri, size: demoBuffer.byteLength })
+      const s3Uri = await archiveDemoToS3(demoUrl, filename)
+      return c.json({ success: true, s3Uri })
     } catch (error) {
       console.error('Error archiving demo:', error)
       return c.json({ error: 'Error archiving demo: ' + (error instanceof Error ? error.message : String(error)) }, 500)

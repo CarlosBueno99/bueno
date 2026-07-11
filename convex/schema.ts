@@ -134,6 +134,20 @@ export default defineSchema({
     steamId: v.string(), // Steam ID64 of the player whose matches were fetched
     shareCode: v.string(), // CS2 share code (unique identifier)
     demoUrl: v.optional(v.string()), // URL to download the demo file
+    demoUrlStatus: v.optional(v.union(
+      v.literal("pending"),
+      v.literal("available"),
+      v.literal("missing"),
+    )),
+    demoUrlLastAttemptAt: v.optional(v.number()),
+    demoUrlError: v.optional(v.string()),
+    archiveStatus: v.optional(v.union(
+      v.literal("pending"),
+      v.literal("archived"),
+      v.literal("failed"),
+    )),
+    archiveLastAttemptAt: v.optional(v.number()),
+    archiveError: v.optional(v.string()),
     matchId: v.optional(v.string()), // Match ID from Steam
     matchTime: v.optional(v.string()), // ISO timestamp of when the match was played
     fetchedAt: v.number(), // Timestamp when we fetched this data
@@ -155,4 +169,4 @@ export default defineSchema({
     .index("by_userId", ["userId"])
     .index("by_steamId", ["steamId"])
     .index("by_shareCode", ["shareCode"]),
-}); 
+});

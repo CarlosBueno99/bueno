@@ -246,6 +246,7 @@ export const saveFetchedShareCodes = internalMutation({
           userId: args.userId,
           steamId: args.steamId,
           shareCode,
+          demoUrlStatus: "pending",
           fetchedAt: now,
         });
         saved++;
@@ -268,12 +269,98 @@ export const saveFetchedShareCodes = internalMutation({
   },
 });
 
+export const saveDemoUrlResults = internalMutation({
+  args: {
+    results: v.array(v.object({
+      shareCode: v.string(),
+      demoUrl: v.optional(v.string()),
+      error: v.optional(v.string()),
+      s3ObjectKey: v.optional(v.string()),
+      archiveError: v.optional(v.string()),
+      matchId: v.optional(v.string()),
+      matchTime: v.optional(v.string()),
+      teamScores: v.optional(v.array(v.number())),
+      matchResult: v.optional(v.number()),
+      targetPlayerTeam: v.optional(v.number()),
+      playerStats: v.optional(v.object({
+        kills: v.number(),
+        deaths: v.number(),
+        assists: v.number(),
+        headshots: v.number(),
+        mvps: v.number(),
+        score: v.number(),
+      })),
+    })),
+  },
+  returns: v.object({ available: v.number(), missing: v.number() }),
+  handler: async (ctx, args) => {
+    let available = 0;
+    let missing = 0;
+    const attemptedAt = Date.now();
+
+    for (const result of args.results) {
+      const match = await ctx.db
+        .query("cs2Matches")
+        .withIndex("by_shareCode", (q) => q.eq("shareCode", result.shareCode))
+        .unique();
+      if (!match) continue;
+
+      const status: "available" | "missing" = result.demoUrl ? "available" : "missing";
+      if (result.demoUrl) available++;
+      else missing++;
+
+      await ctx.db.patch(match._id, {
+        demoUrl: result.demoUrl ?? match.demoUrl,
+        demoUrlStatus: status,
+        demoUrlLastAttemptAt: attemptedAt,
+        demoUrlError: result.demoUrl ? undefined : (result.error ?? "No demo URL returned"),
+        s3ObjectKey: result.s3ObjectKey ?? match.s3ObjectKey,
+        archiveStatus: result.s3ObjectKey ? "archived" : (result.demoUrl ? "failed" : match.archiveStatus),
+        archiveLastAttemptAt: result.demoUrl ? attemptedAt : match.archiveLastAttemptAt,
+        archiveError: result.s3ObjectKey ? undefined : result.archiveError,
+        matchId: result.matchId ?? match.matchId,
+        matchTime: result.matchTime ?? match.matchTime,
+        teamScores: result.teamScores ?? match.teamScores,
+        matchResult: result.matchResult ?? match.matchResult,
+        targetPlayerTeam: result.targetPlayerTeam ?? match.targetPlayerTeam,
+        playerStats: result.playerStats ?? match.playerStats,
+      });
+    }
+
+    return { available, missing };
+  },
+});
+
+export const getMatchesPendingDemoUrl = internalQuery({
+  args: { steamId: v.string(), limit: v.number() },
+  returns: v.array(v.string()),
+  handler: async (ctx, args) => {
+    const matches = await ctx.db
+      .query("cs2Matches")
+      .withIndex("by_steamId", (q) => q.eq("steamId", args.steamId))
+      .collect();
+
+    return matches
+      .filter((match) => !match.s3ObjectKey)
+      .sort((a, b) => {
+        const attemptA = a.demoUrlLastAttemptAt ?? 0;
+        const attemptB = b.demoUrlLastAttemptAt ?? 0;
+        return attemptA - attemptB || a.fetchedAt - b.fetchedAt;
+      })
+      .slice(0, args.limit)
+      .map((match) => match.shareCode);
+  },
+});
+
 type ScheduledFetchResult = {
   usersChecked: number;
   usersConfigured: number;
   shareCodesFound: number;
   saved: number;
   updated: number;
+  demoUrlsAvailable: number;
+  demoUrlsMissing: number;
+  demosArchived: number;
   errors: string[];
 };
 
@@ -293,6 +380,9 @@ export const fetchNewCounterStrikeGames = internalAction({
     shareCodesFound: v.number(),
     saved: v.number(),
     updated: v.number(),
+    demoUrlsAvailable: v.number(),
+    demoUrlsMissing: v.number(),
+    demosArchived: v.number(),
     errors: v.array(v.string()),
   }),
   handler: async (ctx, args): Promise<ScheduledFetchResult> => {
@@ -304,6 +394,9 @@ export const fetchNewCounterStrikeGames = internalAction({
         shareCodesFound: 0,
         saved: 0,
         updated: 0,
+        demoUrlsAvailable: 0,
+        demoUrlsMissing: 0,
+        demosArchived: 0,
         errors: ["Steam API key not configured. Set STEAM_API_KEY environment variable."],
       };
     }
@@ -319,6 +412,9 @@ export const fetchNewCounterStrikeGames = internalAction({
       shareCodesFound: 0,
       saved: 0,
       updated: 0,
+      demoUrlsAvailable: 0,
+      demoUrlsMissing: 0,
+      demosArchived: 0,
       errors: [],
     };
 
@@ -350,28 +446,125 @@ export const fetchNewCounterStrikeGames = internalAction({
 
       if (shareCodesResult.error) {
         result.errors.push(`${steamId}: ${shareCodesResult.error}`);
-        continue;
       }
 
-      if (shareCodesResult.shareCodes.length === 0) {
-        continue;
+      if (shareCodesResult.shareCodes.length > 0) {
+        const saveResult: { saved: number; updated: number } = await ctx.runMutation(
+          internal.cs2Actions.saveFetchedShareCodes,
+          {
+            userId: target.userId,
+            steamId,
+            shareCodes: shareCodesResult.shareCodes,
+          }
+        );
+
+        result.shareCodesFound += shareCodesResult.shareCodes.length;
+        result.saved += saveResult.saved;
+        result.updated += saveResult.updated;
       }
 
-      const saveResult: { saved: number; updated: number } = await ctx.runMutation(
-        internal.cs2Actions.saveFetchedShareCodes,
-        {
-          userId: target.userId,
-          steamId,
-          shareCodes: shareCodesResult.shareCodes,
-        }
+      const shareCodesToEnrich: string[] = await ctx.runQuery(
+        internal.cs2Actions.getMatchesPendingDemoUrl,
+        { steamId, limit: args.maxMatches ?? 30 }
       );
+      if (shareCodesToEnrich.length === 0) continue;
 
-      result.shareCodesFound += shareCodesResult.shareCodes.length;
-      result.saved += saveResult.saved;
-      result.updated += saveResult.updated;
+      const apiBaseUrl = process.env.CS2_API_BASE_URL?.replace(/\/$/, "");
+      const internalSecret = process.env.CS2_ARCHIVE_INTERNAL_SECRET;
+      if (!apiBaseUrl || !internalSecret) {
+        result.errors.push(
+          `${steamId}: demo enrichment is not configured; set CS2_API_BASE_URL and CS2_ARCHIVE_INTERNAL_SECRET in Convex.`
+        );
+        continue;
+      }
+
+      // Keep each GC request below the Hono route's timeout while still
+      // processing every newly discovered share code.
+      for (let offset = 0; offset < shareCodesToEnrich.length; offset += 4) {
+        const batch = shareCodesToEnrich.slice(offset, offset + 4);
+        const url = new URL(`${apiBaseUrl}/api/cs/matches`);
+        url.searchParams.set("shareCodes", batch.join(","));
+        url.searchParams.set("targetSteamId", steamId);
+
+        try {
+          const response = await fetch(url, {
+            headers: { "x-cs2-internal-secret": internalSecret },
+          });
+          const payload = await response.json();
+          if (!response.ok || !Array.isArray(payload.matches)) {
+            result.errors.push(
+              `${steamId}: demo enrichment failed (${response.status}): ${payload.error ?? "Invalid response"}`
+            );
+            continue;
+          }
+
+          const normalized = payload.matches.map((match: any) => ({
+            shareCode: String(match.shareCode),
+            ...(match.demoUrl ? { demoUrl: String(match.demoUrl) } : {}),
+            ...(match.error ? { error: String(match.error) } : {}),
+            ...(match.s3ObjectKey ? { s3ObjectKey: String(match.s3ObjectKey) } : {}),
+            ...(match.archiveError ? { archiveError: String(match.archiveError) } : {}),
+            ...(match.matchId ? { matchId: String(match.matchId) } : {}),
+            ...(match.matchTime ? { matchTime: String(match.matchTime) } : {}),
+            ...(Array.isArray(match.teamScores) ? { teamScores: match.teamScores.map(Number) } : {}),
+            ...(typeof match.matchResult === "number" ? { matchResult: match.matchResult } : {}),
+            ...(typeof match.targetPlayerTeam === "number" ? { targetPlayerTeam: match.targetPlayerTeam } : {}),
+            ...(match.playerStats ? { playerStats: match.playerStats } : {}),
+          }));
+          const savedUrls: { available: number; missing: number } = await ctx.runMutation(
+            internal.cs2Actions.saveDemoUrlResults,
+            { results: normalized }
+          );
+          result.demoUrlsAvailable += savedUrls.available;
+          result.demoUrlsMissing += savedUrls.missing;
+          result.demosArchived += normalized.filter((match: any) => match.s3ObjectKey).length;
+        } catch (error) {
+          result.errors.push(
+            `${steamId}: demo enrichment request failed: ${error instanceof Error ? error.message : String(error)}`
+          );
+        }
+      }
     }
 
     return result;
+  },
+});
+
+export const triggerCs2Automation = action({
+  args: {},
+  returns: v.object({
+    success: v.boolean(),
+    usersChecked: v.number(),
+    shareCodesFound: v.number(),
+    demoUrlsAvailable: v.number(),
+    demoUrlsMissing: v.number(),
+    demosArchived: v.number(),
+    errors: v.array(v.string()),
+    error: v.optional(v.string()),
+  }),
+  handler: async (ctx) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      return { success: false, usersChecked: 0, shareCodesFound: 0, demoUrlsAvailable: 0, demoUrlsMissing: 0, demosArchived: 0, errors: [], error: "Not authenticated" };
+    }
+    const permission = await ctx.runQuery(api.auth.getUserPermission, {});
+    if (!permission || !["admin", "owner"].includes(permission)) {
+      return { success: false, usersChecked: 0, shareCodesFound: 0, demoUrlsAvailable: 0, demoUrlsMissing: 0, demosArchived: 0, errors: [], error: "Insufficient permissions" };
+    }
+
+    const result: ScheduledFetchResult = await ctx.runAction(
+      internal.cs2Actions.fetchNewCounterStrikeGames,
+      { maxMatches: 30 }
+    );
+    return {
+      success: result.errors.length === 0,
+      usersChecked: result.usersChecked,
+      shareCodesFound: result.shareCodesFound,
+      demoUrlsAvailable: result.demoUrlsAvailable,
+      demoUrlsMissing: result.demoUrlsMissing,
+      demosArchived: result.demosArchived,
+      errors: result.errors,
+    };
   },
 });
 
@@ -551,6 +744,9 @@ export const saveMatchResults = mutation({
         // Update existing record
         await ctx.db.patch(existing._id, {
           demoUrl: match.demoUrl || existing.demoUrl,
+          demoUrlStatus: match.demoUrl ? "available" : (existing.demoUrlStatus ?? "missing"),
+          demoUrlLastAttemptAt: now,
+          demoUrlError: match.demoUrl ? undefined : (existing.demoUrlError ?? "No demo URL returned"),
           matchId: match.matchId || existing.matchId,
           matchTime: match.matchTime || existing.matchTime,
           teamScores: match.teamScores || existing.teamScores,
@@ -567,6 +763,9 @@ export const saveMatchResults = mutation({
           steamId: args.targetSteamId,
           shareCode: match.shareCode,
           demoUrl: match.demoUrl,
+          demoUrlStatus: match.demoUrl ? "available" : "missing",
+          demoUrlLastAttemptAt: now,
+          demoUrlError: match.demoUrl ? undefined : "No demo URL returned",
           matchId: match.matchId,
           matchTime: match.matchTime,
           teamScores: match.teamScores,
@@ -595,6 +794,12 @@ export const getMatchesBySteamId = query({
       _id: v.id("cs2Matches"),
       shareCode: v.string(),
       demoUrl: v.optional(v.string()),
+      demoUrlStatus: v.optional(v.union(v.literal("pending"), v.literal("available"), v.literal("missing"))),
+      demoUrlLastAttemptAt: v.optional(v.number()),
+      demoUrlError: v.optional(v.string()),
+      archiveStatus: v.optional(v.union(v.literal("pending"), v.literal("archived"), v.literal("failed"))),
+      archiveLastAttemptAt: v.optional(v.number()),
+      archiveError: v.optional(v.string()),
       matchId: v.optional(v.string()),
       matchTime: v.optional(v.string()),
       fetchedAt: v.number(),
@@ -622,6 +827,12 @@ export const getMatchesBySteamId = query({
       _id: m._id,
       shareCode: m.shareCode,
       demoUrl: m.demoUrl,
+      demoUrlStatus: m.demoUrlStatus,
+      demoUrlLastAttemptAt: m.demoUrlLastAttemptAt,
+      demoUrlError: m.demoUrlError,
+      archiveStatus: m.archiveStatus,
+      archiveLastAttemptAt: m.archiveLastAttemptAt,
+      archiveError: m.archiveError,
       matchId: m.matchId,
       matchTime: m.matchTime,
       fetchedAt: m.fetchedAt,
@@ -710,6 +921,12 @@ export const getMyMatches = query({
       targetSteamId: v.string(),
       shareCode: v.string(),
       demoUrl: v.optional(v.string()),
+      demoUrlStatus: v.optional(v.union(v.literal("pending"), v.literal("available"), v.literal("missing"))),
+      demoUrlLastAttemptAt: v.optional(v.number()),
+      demoUrlError: v.optional(v.string()),
+      archiveStatus: v.optional(v.union(v.literal("pending"), v.literal("archived"), v.literal("failed"))),
+      archiveLastAttemptAt: v.optional(v.number()),
+      archiveError: v.optional(v.string()),
       matchId: v.optional(v.string()),
       matchTime: v.optional(v.string()),
       fetchedAt: v.number(),
@@ -748,6 +965,12 @@ export const getMyMatches = query({
       targetSteamId: m.steamId,
       shareCode: m.shareCode,
       demoUrl: m.demoUrl,
+      demoUrlStatus: m.demoUrlStatus,
+      demoUrlLastAttemptAt: m.demoUrlLastAttemptAt,
+      demoUrlError: m.demoUrlError,
+      archiveStatus: m.archiveStatus,
+      archiveLastAttemptAt: m.archiveLastAttemptAt,
+      archiveError: m.archiveError,
       matchId: m.matchId,
       matchTime: m.matchTime,
       fetchedAt: m.fetchedAt,
@@ -948,8 +1171,17 @@ export const triggerDemoArchive = action({
       };
     }
     
-    // Run the internal action (from the Node.js file with more memory)
-    const result: ArchiveResult = await ctx.runAction(internal.cs2DemoArchiver.downloadPendingDemos, {});
+    // Backwards-compatible alias for clients that still call the old action.
+    const automation: ScheduledFetchResult = await ctx.runAction(
+      internal.cs2Actions.fetchNewCounterStrikeGames,
+      { maxMatches: 30 }
+    );
+    const result: ArchiveResult = {
+      processed: automation.demoUrlsAvailable + automation.demoUrlsMissing,
+      successful: automation.demosArchived,
+      failed: automation.demoUrlsMissing + automation.errors.length,
+      errors: automation.errors,
+    };
     
     return {
       success: true,
